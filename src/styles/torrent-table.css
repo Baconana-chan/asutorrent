@@ -1,0 +1,361 @@
+/* ── Torrent Table ────────────────────────────────────────────── */
+.torrent-table-wrap {
+  flex: 1; overflow: hidden;
+  display: flex; flex-direction: column;
+}
+.torrent-table-header {
+  display: flex; align-items: center;
+  height: 28px;
+  background: var(--bg-detail-tabs);
+  border-bottom: 1px solid var(--border);
+  font-size: 11px; font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  flex-shrink: 0;
+  position: relative;
+}
+.th {
+  padding: 0 8px;
+  display: flex; align-items: center;
+  cursor: pointer;
+  transition: color var(--duration-fast) var(--ease-out),
+              background var(--duration-fast) var(--ease-out);
+  user-select: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  position: relative;
+}
+.th:hover { color: var(--text-secondary); background: var(--bg-btn-hover); }
+.th .sort-icon { margin-left: 2px; font-size: 9px; opacity: 0.5; }
+
+/* ── Column drag states ────────────────────────────────────────── */
+.th-dragging {
+  opacity: 0.4;
+  background: var(--bg-table-row-selected) !important;
+}
+.th-drag-over {
+  background: var(--accent-bg) !important;
+  color: var(--accent) !important;
+}
+.th-drag-over::after {
+  content: '';
+  position: absolute;
+  left: 0; top: 2px; bottom: 2px;
+  width: 2px;
+  background: var(--accent);
+  border-radius: 0 2px 2px 0;
+}
+
+/* ── Column picker trigger (gear icon) ─────────────────────────── */
+.th-picker-trigger {
+  cursor: default;
+  padding: 0 2px;
+}
+.th-picker-trigger:hover {
+  background: transparent !important;
+}
+.col-picker-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px;
+  border: none; background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: 3px;
+  transition: all var(--duration-fast) var(--ease-out);
+}
+.col-picker-btn:hover {
+  background: var(--bg-btn-hover);
+  color: var(--text);
+}
+.col-picker-btn svg {
+  width: 14px; height: 14px;
+}
+
+/* ── Column picker dropdown ────────────────────────────────────── */
+.col-picker-dropdown {
+  position: absolute;
+  right: 0; top: 100%;
+  z-index: 150;
+  min-width: 200px;
+  background: var(--bg-toolbar);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px;
+  box-shadow: var(--shadow-lg);
+  animation: menuFadeIn var(--duration-normal) var(--ease-out);
+  transform-origin: top right;
+}
+.col-picker-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 8px 6px;
+  border-bottom: 1px solid var(--border-light);
+  margin-bottom: 2px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+.col-picker-reset-btn {
+  border: none; background: transparent;
+  color: var(--accent);
+  font-size: 10px;
+  font-family: var(--font);
+  font-weight: 600;
+  cursor: pointer;
+  padding: 1px 6px;
+  border-radius: 3px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  transition: background var(--duration-fast) var(--ease-out);
+}
+.col-picker-reset-btn:hover {
+  background: var(--accent-bg);
+}
+.col-picker-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  cursor: pointer;
+  border-radius: 4px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  transition: background var(--duration-fast) var(--ease-out);
+  user-select: none;
+  position: relative;
+}
+.col-picker-item:hover {
+  background: var(--bg-btn-hover);
+}
+.col-picker-drag-handle {
+  font-size: 14px;
+  color: var(--text-muted);
+  cursor: grab;
+  flex-shrink: 0;
+  line-height: 1;
+}
+.col-picker-drag-handle:active {
+  cursor: grabbing;
+}
+.col-picker-item input[type="checkbox"] {
+  accent-color: var(--accent);
+  width: 13px; height: 13px;
+  flex-shrink: 0;
+}
+.col-picker-label {
+  flex: 1;
+}
+
+.torrent-table {
+  flex: 1; overflow-y: auto;
+  background: var(--bg-table);
+}
+
+/* ── Torrent Row ──────────────────────────────────────────────── */
+.torrent-row {
+  display: flex; align-items: center;
+  height: 36px;
+  border-bottom: 1px solid var(--border-light);
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-out),
+              transform var(--duration-instant) var(--ease-out);
+  font-size: 12px;
+  animation: rowEnter var(--duration-normal) var(--ease-out) both;
+  animation-delay: calc(var(--row-index, 0) * 20ms);
+}
+.torrent-row:nth-child(odd) { background: var(--bg-table-row-alt); }
+.torrent-row:nth-child(even) { background: var(--bg-table-row); }
+.torrent-row:hover {
+  background: var(--bg-table-row-hover);
+  position: relative;
+}
+.torrent-row:hover::after {
+  content: '';
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 2px;
+  background: var(--accent);
+  opacity: 0.4;
+  animation: fadeSlideDown var(--duration-fast) var(--ease-out) both;
+}
+.torrent-row.selected {
+  background: var(--bg-table-row-selected);
+  position: relative;
+}
+.torrent-row.selected::after {
+  content: '';
+  position: absolute;
+  left: 0; top: 0; bottom: 0;
+  width: 2px;
+  background: var(--accent);
+  animation: fadeSlideDown var(--duration-normal) var(--ease-out) both;
+}
+.torrent-row:active {
+  transform: scale(1.002);
+}
+
+.td {
+  padding: 0 8px;
+  display: flex; align-items: center;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  height: 100%;
+}
+
+/* ── Inline progress in row ───────────────────────────────────── */
+.progress-cell { gap: 6px; }
+.progress-bar-row {
+  flex: 1; height: 12px;
+  background: var(--bg-input);
+  border-radius: 3px;
+  overflow: hidden;
+  position: relative;
+}
+.progress-fill-row {
+  height: 100%;
+  border-radius: 3px;
+  transition: width var(--duration-slow) var(--ease-out);
+  min-width: 2px;
+  position: relative;
+  overflow: hidden;
+}
+.progress-fill-row.downloading {
+  background: linear-gradient(90deg, #1a7a3e, #34c26a);
+  background-size: 200% 100%;
+  animation: progressShimmer 2s ease-in-out infinite;
+}
+.progress-fill-row.downloading::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.1) 50%, transparent 100%);
+  background-size: 200% 100%;
+  animation: progressShimmer 1.5s ease-in-out infinite;
+}
+.progress-fill-row.seeding {
+  background: linear-gradient(90deg, #22c55e, #4ade80);
+  background-size: 200% 100%;
+}
+.progress-fill-row.paused { background: var(--yellow); }
+.progress-fill-row.error { background: var(--red); }
+.progress-fill-row.metadata { background: var(--purple); }
+.progress-fill-row.checking { background: var(--purple); }
+
+.progress-pct {
+  font-size: 11px; color: var(--text-secondary); min-width: 36px; text-align: right;
+  font-variant-numeric: tabular-nums;
+  transition: color var(--duration-normal) var(--ease-out);
+}
+.torrent-row:hover .progress-pct {
+  color: var(--text);
+}
+.progress-size { font-size: 11px; color: var(--text-muted); min-width: 80px; }
+
+/* ── State badge ──────────────────────────────────────────────── */
+.state-badge {
+  font-size: 10px; font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 3px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  transition: background var(--duration-normal) var(--ease-out),
+              color var(--duration-normal) var(--ease-out),
+              transform var(--duration-fast) var(--ease-bounce);
+}
+.torrent-row:hover .state-badge {
+  transform: scale(1.05);
+}
+.state-badge.downloading { background: var(--accent-bg); color: var(--accent); }
+.state-badge.seeding { background: var(--green-bg); color: var(--green); }
+.state-badge.paused { background: var(--yellow-bg); color: var(--yellow); }
+.state-badge.error { background: var(--red-bg); color: var(--red); }
+.state-badge.checking { background: rgba(139, 92, 246, 0.12); color: var(--purple); }
+.state-badge.metadata { background: rgba(139, 92, 246, 0.12); color: var(--purple); }
+.state-badge.completed { background: var(--green-bg); color: var(--green); }
+
+/* ── Speed / ETA / Peers styling ──────────────────────────────── */
+.td-speed { color: var(--green); font-family: var(--font-mono); font-size: 11px; font-variant-numeric: tabular-nums; transition: color var(--duration-fast) var(--ease-out); }
+.td-speed:hover { color: var(--text); }
+.td-speed.down { color: var(--accent-light); }
+.td-up { color: var(--green); }
+.td-eta { color: var(--text-secondary); font-size: 11px; }
+
+/* ── Name cell ────────────────────────────────────────────────── */
+.name-cell { gap: 8px; }
+.name-cell .name-text {
+  overflow: hidden; text-overflow: ellipsis;
+  transition: color var(--duration-fast) var(--ease-out);
+}
+.torrent-row:hover .name-cell .name-text { color: var(--text); }
+.name-cell .state-dot {
+  width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0;
+  transition: transform var(--duration-fast) var(--ease-bounce);
+}
+.torrent-row:hover .state-dot {
+  transform: scale(1.5);
+}
+
+/* ── Empty state ──────────────────────────────────────────────── */
+.empty-table {
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  height: 100%;
+  gap: 8px;
+  color: var(--text-muted);
+  animation: fadeSlideUp var(--duration-reveal) var(--ease-out) both;
+}
+.empty-table .empty-icon { font-size: 36px; opacity: 0.4; }
+.empty-table h3 { font-size: 14px; font-weight: 600; color: var(--text-secondary); }
+.empty-table p { font-size: 12px; }
+
+/* ── Drop Zone ────────────────────────────────────────────────── */
+.torrent-table-wrap.drag-over .torrent-table-header,
+.torrent-table-wrap.drag-over .torrent-table {
+  filter: blur(2px);
+  pointer-events: none;
+}
+.drop-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--bg-app) 85%, transparent);
+  border: 2px dashed var(--accent);
+  border-radius: 8px;
+  margin: 12px;
+  animation: dropFadeIn 0.15s ease-out;
+}
+@keyframes dropFadeIn {
+  from { opacity: 0; transform: scale(0.97); }
+  to { opacity: 1; transform: scale(1); }
+}
+.drop-overlay-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  color: var(--accent-light);
+  font-size: 14px;
+  font-weight: 500;
+}
+.drop-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  border: 2px solid var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 24px;
+  font-weight: 300;
+  color: var(--accent);
+}
+

@@ -1,0 +1,21 @@
+# Rust / Cargo
+target/
+
+# Node.js
+node_modules/
+dist/
+
+# Freebuff Desktop workspace files
+.freebuff/
+
+# IDE / OS
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log

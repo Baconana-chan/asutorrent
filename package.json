@@ -1,0 +1,31 @@
+{
+  "name": "asutorrent",
+  "version": "1.0.0",
+  "description": "Torrent client built with Tauri + librqbit + Preact",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "tauri": "tauri",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:rust": "cd src-tauri && cargo test"
+  },
+  "dependencies": {
+    "@preact/signals": "^2.0.0",
+    "@tauri-apps/api": "^2.0.0",
+    "@tauri-apps/plugin-dialog": "^2.0.0",
+    "preact": "^10.26.0"
+  },
+  "devDependencies": {
+    "@preact/preset-vite": "^2.10.0",
+    "@tauri-apps/cli": "^2.0.0",
+    "@testing-library/jest-dom": "^7.0.0",
+    "@testing-library/preact": "^3.2.4",
+    "jsdom": "^29.1.1",
+    "typescript": "^5.7.0",
+    "vite": "^6.0.0",
+    "vitest": "^4.1.10"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "$schema": "https://raw.githubusercontent.com/nicegram/nicegram/master/.schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Default capability for AsuTorrent",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "dialog:default"
+  ]
+}

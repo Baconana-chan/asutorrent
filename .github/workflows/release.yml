@@ -1,0 +1,157 @@
+name: Release
+on:
+  push:
+    tags:
+      - "v*"          # v0.1.0, v0.2.0, etc.
+      - "app-v*"      # app-v0.1.0 (Tauri action compatible)
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release (e.g. v0.1.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    name: Release (${{ matrix.platform }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: ubuntu-22.04
+            args: ""
+          - platform: ubuntu-22.04-arm
+            args: "--target aarch64-unknown-linux-gnu"
+          - platform: macos-latest
+            args: "--target x86_64-apple-darwin"
+          - platform: macos-latest
+            args: "--target aarch64-apple-darwin"
+          - platform: windows-latest
+            args: ""
+
+    runs-on: ${{ matrix.platform }}
+    defaults:
+      run:
+        working-directory: asutorrent
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # ── Rust setup ──────────────────────────────────────────────
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: >
+            ${{ matrix.platform == 'macos-latest' &&
+            'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: asutorrent/src-tauri -> target
+
+      # ── Node.js setup ───────────────────────────────────────────
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+          cache-dependency-path: asutorrent/package-lock.json
+
+      # ── Linux dependencies ──────────────────────────────────────
+      - name: Install Linux dependencies
+        if: startsWith(matrix.platform, 'ubuntu')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            xdg-utils \
+            libssl-dev
+
+      # ── macOS signing ───────────────────────────────────────────
+      - name: Import Apple Developer Certificate
+        if: matrix.platform == 'macos-latest' && secrets.APPLE_CERTIFICATE != ''
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          echo "$APPLE_CERTIFICATE" | base64 --decode > certificate.p12
+          security create-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          security import certificate.p12 -k build.keychain \
+            -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list \
+            -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASSWORD" build.keychain
+
+      # ── Windows signing ─────────────────────────────────────────
+      - name: Import Windows Certificate
+        if: matrix.platform == 'windows-latest' && secrets.WINDOWS_CERTIFICATE != ''
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          New-Item -ItemType directory -Path certificate -Force
+          Set-Content -Path certificate/tempCert.txt -Value $env:WINDOWS_CERTIFICATE
+          certutil -decode certificate/tempCert.txt certificate/certificate.pfx
+          Remove-Item -Path certificate/tempCert.txt
+          Import-PfxCertificate \
+            -FilePath certificate/certificate.pfx \
+            -CertStoreLocation Cert:\CurrentUser\My \
+            -Password (ConvertTo-SecureString -String $env:WINDOWS_CERTIFICATE_PASSWORD -Force -AsPlainText)
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: TypeScript check
+        run: npx tsc --noEmit
+
+      # ── Tauri build & release ──────────────────────────────────
+      - name: Build & publish release
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # macOS signing & notarization
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_PATH: ${{ secrets.APPLE_API_KEY_PATH }}
+        with:
+          projectPath: asutorrent
+          tauriScript: npx tauri
+          args: ${{ matrix.args }}
+          tagName: ${{ github.ref_name }}
+          releaseName: "AsuTorrent ${{ github.ref_name }}"
+          releaseBody: |
+            ## AsuTorrent ${{ github.ref_name }}
+
+            See the assets below to download the installer for your platform.
+
+            ### 🍎 macOS
+            - `asutorrent_x64.dmg` — Intel Macs (x86_64)
+            - `asutorrent_aarch64.dmg` — Apple Silicon (M1/M2/M3)
+
+            ### 🪟 Windows
+            - `asutorrent_x64.msi` — Windows 10/11 (x86_64)
+
+            ### 🐧 Linux
+            - `asutorrent_amd64.deb` — Debian/Ubuntu
+            - `asutorrent_x86_64.AppImage` — any x86_64 Linux
+            - `asutorrent.x86_64.rpm` — Fedora/RHEL
+
+            ### 🔧 Notes
+            - macOS: Gatekeeper may require right-click → Open on first launch for unsigned builds
+            - Windows: SmartScreen may show a warning until the build is signed and trusted
+            - Linux: Requires `libwebkit2gtk-4.1-dev` and `libappindicator3-dev` for the GUI
+          releaseDraft: true
+          prerelease: ${{ contains(github.ref_name, '-') }}

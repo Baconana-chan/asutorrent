@@ -1,0 +1,153 @@
+/* ===================================================================
+   AsuTorrent — qBitTorrent-inspired dark theme
+   =================================================================== */
+
+   /* ── Reset & Variables ────────────────────────────────────────── */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+/* Smooth theme-switch transitions on every element */
+*, *::before, *::after {
+  transition: background-color var(--duration-normal) var(--ease-out),
+              color var(--duration-normal) var(--ease-out),
+              border-color var(--duration-normal) var(--ease-out),
+              box-shadow var(--duration-normal) var(--ease-out);
+}
+
+/* ── Dark Theme (default) ──────────────────────────────────── */
+:root,
+[data-theme="dark"] {
+  --bg-app: #0f1612;
+  --bg-sidebar: #141c17;
+  --bg-toolbar: #141c17;
+  --bg-table: #0d1410;
+  --bg-table-row: #141c17;
+  --bg-table-row-alt: #111915;
+  --bg-table-row-hover: #1a2420;
+  --bg-table-row-selected: #1a3328;
+  --bg-detail: #0d1410;
+  --bg-detail-tabs: #0b110e;
+  --bg-statusbar: #0b110e;
+  --bg-input: #0b110e;
+  --bg-btn-hover: #1b2b22;
+  --bg-scrollbar: #1b2b22;
+  --bg-tooltip: #1c2f24;
+  --border: #1c2f24;
+  --border-light: #142218;
+  --text: #dde8e2;
+  --text-secondary: #8aa096;
+  --text-muted: #5a6e62;
+  --accent: #2d8a4e;
+  --accent-hover: #267342;
+  --green: #34d35e;
+  --green-bg: rgba(52, 211, 94, 0.12);
+  --yellow: #f0a020;
+  --yellow-bg: rgba(240, 160, 32, 0.12);
+  --red: #e34a4a;
+  --red-bg: rgba(227, 74, 74, 0.12);
+  --purple: #9a7cf6;
+  --accent-light: #34c26a;
+  --accent-bg: rgba(45, 138, 78, 0.12);
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.3);
+  --shadow-md: 0 4px 12px rgba(0,0,0,0.4);
+  --shadow-lg: 0 8px 32px rgba(0,0,0,0.5);
+  --overlay-bg: rgba(0,0,0,0.5);
+  --font: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+  --radius: 0px;
+  --sidebar-w: 200px;
+  --detail-h: 200px;
+  --toolbar-h: 40px;
+  --statusbar-h: 28px;
+  /* Transition tokens */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --ease-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --duration-instant: 0.08s;
+  --duration-fast: 0.12s;
+  --duration-normal: 0.2s;
+  --duration-slow: 0.35s;
+  --duration-reveal: 0.45s;
+}
+
+/* ── Light Theme ──────────────────────────────────────────── */
+[data-theme="light"] {
+  /* Light forest / morning-sage palette */
+  --bg-app: #eaf0ec;
+  --bg-sidebar: #f2f6f3;
+  --bg-toolbar: #f2f6f3;
+  --bg-table: #edf3ef;
+  --bg-table-row: #f2f6f3;
+  --bg-table-row-alt: #eaf0ec;
+  --bg-table-row-hover: #dee8e1;
+  --bg-table-row-selected: #cde0d4;
+  --bg-detail: #edf3ef;
+  --bg-detail-tabs: #e6eee9;
+  --bg-statusbar: #e6eee9;
+  --bg-input: #fafcfa;
+  --bg-btn-hover: #d6e2db;
+  --bg-scrollbar: #bfcec4;
+  --bg-tooltip: #1a2e22;
+  --border: #cbd8cf;
+  --border-light: #dbe6de;
+  --text: #1f3327;
+  --text-secondary: #4a5f52;
+  --text-muted: #658071;
+  --accent: #15803d;
+  --accent-hover: #166534;
+  --green: #16a34a;
+  --green-bg: rgba(22, 163, 74, 0.08);
+  --yellow: #b5831a;
+  --yellow-bg: rgba(181, 131, 26, 0.06);
+  --red: #dc2626;
+  --red-bg: rgba(220, 38, 38, 0.06);
+  --purple: #7c3aed;
+  --accent-light: #22c55e;
+  --accent-bg: rgba(21, 128, 61, 0.08);
+  --shadow-sm: 0 1px 3px rgba(0,0,0,0.05);
+  --shadow-md: 0 4px 12px rgba(0,0,0,0.07);
+  --shadow-lg: 0 8px 32px rgba(0,0,0,0.1);
+  --overlay-bg: rgba(0,0,0,0.2);
+}
+
+/* Static properties — no transition on these */
+:root {
+  --font: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+  --radius: 0px;
+  --sidebar-w: 200px;
+  --detail-h: 200px;
+  --toolbar-h: 40px;
+  --statusbar-h: 28px;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --ease-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --duration-instant: 0.08s;
+  --duration-fast: 0.12s;
+  --duration-normal: 0.2s;
+  --duration-slow: 0.35s;
+  --duration-reveal: 0.45s;
+}
+
+html, body {
+  height: 100%;
+  font-family: var(--font);
+  background: var(--bg-app);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.5;
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+  scrollbar-color: var(--bg-scrollbar) transparent;
+}
+
+/* Exempt the scrollbar track from the universal transition to avoid visual glitch */
+::-webkit-scrollbar-track {
+  transition: none !important;
+}
+
+#app { height: 100%; }
+

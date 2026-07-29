@@ -1,0 +1,172 @@
+/* ── Scrollbar ───────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--bg-scrollbar); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #3a4458; }
+
+/* ── Loading ──────────────────────────────────────────────────── */
+.loading-screen {
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  height: 100vh; gap: 16px;
+  color: var(--text-secondary);
+  background: var(--bg-app);
+}
+.spinner {
+  width: 28px; height: 28px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── Error screen ──────────────────────────────────────────────── */
+.error-screen {
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  height: 100vh;
+  padding: 40px;
+  gap: 12px;
+  color: var(--text-secondary);
+  background: var(--bg-app);
+  text-align: center;
+}
+.error-screen .error-icon {
+  font-size: 48px;
+  margin-bottom: 8px;
+}
+.error-screen h2 {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text);
+}
+.error-message {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--red);
+  background: var(--red-bg);
+  border: 1px solid var(--red);
+  border-radius: 6px;
+  padding: 16px;
+  max-width: 520px;
+  white-space: pre-wrap;
+  text-align: left;
+  line-height: 1.6;
+}
+.error-actions {
+  gap: 8px;
+  margin-top: 8px;
+}
+
+/* ── Global Animation Keyframes ─────────────────────────────── */
+
+/* Fade & slide up — used for panels, sections, rows */
+@keyframes fadeSlideUp {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Fade & slide down — for dropdowns */
+@keyframes fadeSlideDown {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Fade & slide in from left — sidebar items */
+@keyframes slideInLeft {
+  from { opacity: 0; transform: translateX(-8px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+/* Scale in — modals */
+@keyframes scaleIn {
+  from { opacity: 0; transform: scale(0.93); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+/* Scale in from slightly above — modals */
+@keyframes scaleInFromTop {
+  from { opacity: 0; transform: scale(0.95) translateY(-10px); }
+  to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+/* Smooth pulse — status dots, indicators */
+@keyframes pulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}
+
+/* Pulse glow — active elements */
+@keyframes pulseGlow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(52, 195, 106, 0); }
+  50% { box-shadow: 0 0 0 4px rgba(52, 195, 106, 0.2); }
+}
+
+/* Progress bar shimmer — active download */
+@keyframes progressShimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+/* Skeleton shimmer loading */
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+/* Speed value change flash */
+@keyframes speedFlash {
+  0% { color: var(--accent-light); }
+  100% { color: var(--text); }
+}
+
+/* Spinning loader */
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Staggered row entrance */
+@keyframes rowEnter {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Loading sub-text */
+.loading-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  animation: pulse 2s ease-in-out infinite;
+}
+
+/* ── Skeleton loading row ─────────────────────────────────────── */
+.skeleton-row {
+  display: flex; align-items: center;
+  height: 36px;
+  padding: 0 8px;
+  gap: 8px;
+  border-bottom: 1px solid var(--border-light);
+}
+.skeleton-cell {
+  height: 12px;
+  background: linear-gradient(90deg, var(--bg-table-row-alt) 0%, var(--bg-btn-hover) 50%, var(--bg-table-row-alt) 100%);
+  background-size: 200% 100%;
+  border-radius: 3px;
+  animation: shimmer 1.5s ease-in-out infinite;
+}
+.skeleton-cell.name { flex: 1 1 250px; }
+.skeleton-cell.size { flex: 0 0 85px; }
+.skeleton-cell.progress { flex: 1 1 150px; height: 14px; border-radius: 4px; }
+.skeleton-cell.speed { flex: 0 0 85px; }
+.skeleton-cell.eta { flex: 0 0 80px; }
+.skeleton-cell.peers { flex: 0 0 70px; }
+.skeleton-cell.state { flex: 0 0 80px; }
+
+/* ===================================================================
+   LAYOUT
+   =================================================================== */
+.app {
+  display: flex; flex-direction: column;
+  height: 100vh;
+}
+

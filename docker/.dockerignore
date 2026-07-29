@@ -1,0 +1,7 @@
+*
+!asutorrent/src-tauri/src
+!asutorrent/src-tauri/Cargo.toml
+!asutorrent/src-tauri/Cargo.lock
+!asutorrent/src-tauri/build.rs
+!asutorrent/src-tauri/icons
+!LICENSE
