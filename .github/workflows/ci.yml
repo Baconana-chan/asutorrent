@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: asutorrent
+        working-directory: .
     steps:
       - uses: actions/checkout@v4
 
@@ -24,7 +24,7 @@ jobs:
         with:
           node-version: lts/*
           cache: npm
-          cache-dependency-path: asutorrent/package-lock.json
+          cache-dependency-path: package-lock.json
 
       - name: Install dependencies
         run: npm ci
@@ -40,7 +40,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: asutorrent/src-tauri
+        working-directory: src-tauri
     steps:
       - uses: actions/checkout@v4
 
@@ -52,7 +52,7 @@ jobs:
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: asutorrent/src-tauri -> target
+          workspaces: src-tauri -> target
 
       - name: Install Linux dependencies
         run: |

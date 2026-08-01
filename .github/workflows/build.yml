@@ -4,9 +4,9 @@ on:
   push:
     branches: [main, master]
     paths:
-      - "asutorrent/src-tauri/**"
-      - "asutorrent/src/**"
-      - "asutorrent/package.json"
+      - "src-tauri/**"
+      - "src/**"
+      - "package.json"
       - ".github/workflows/build.yml"
 
 concurrency:
@@ -34,7 +34,7 @@ jobs:
     runs-on: ${{ matrix.platform }}
     defaults:
       run:
-        working-directory: asutorrent
+        working-directory: .
 
     steps:
       - uses: actions/checkout@v4
@@ -50,7 +50,7 @@ jobs:
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: asutorrent/src-tauri -> target
+          workspaces: src-tauri -> target
 
       # ── Node.js setup ───────────────────────────────────────────
       - name: Setup Node.js
@@ -58,7 +58,7 @@ jobs:
         with:
           node-version: lts/*
           cache: npm
-          cache-dependency-path: asutorrent/package-lock.json
+          cache-dependency-path: package-lock.json
 
       # ── Linux dependencies ──────────────────────────────────────
       - name: Install Linux dependencies
@@ -137,7 +137,7 @@ jobs:
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
           APPLE_API_KEY_PATH: ${{ secrets.APPLE_API_KEY_PATH }}
         with:
-          projectPath: asutorrent
+          projectPath: .
           tauriScript: npx tauri
           args: ${{ matrix.args }}
 
@@ -148,6 +148,6 @@ jobs:
         with:
           name: asutorrent-${{ matrix.platform }}-${{ matrix.args || 'default' }}
           path: |
-            asutorrent/src-tauri/target/release/bundle/**
-            !asutorrent/src-tauri/target/release/bundle/**/*.zip
+            src-tauri/target/release/bundle/**
+            !src-tauri/target/release/bundle/**/*.zip
           if-no-files-found: warn

@@ -35,7 +35,7 @@ jobs:
     runs-on: ${{ matrix.platform }}
     defaults:
       run:
-        working-directory: asutorrent
+        working-directory: .
 
     steps:
       - uses: actions/checkout@v4
@@ -51,7 +51,7 @@ jobs:
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: asutorrent/src-tauri -> target
+          workspaces: src-tauri -> target
 
       # ── Node.js setup ───────────────────────────────────────────
       - name: Setup Node.js
@@ -59,7 +59,7 @@ jobs:
         with:
           node-version: lts/*
           cache: npm
-          cache-dependency-path: asutorrent/package-lock.json
+          cache-dependency-path: package-lock.json
 
       # ── Linux dependencies ──────────────────────────────────────
       - name: Install Linux dependencies
@@ -137,11 +137,11 @@ jobs:
           APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
           APPLE_API_KEY_PATH: ${{ secrets.APPLE_API_KEY_PATH }}
         with:
-          projectPath: asutorrent
+          projectPath: .
           tauriScript: npx tauri
           args: ${{ matrix.args }}
-          tagName: ${{ github.ref_name }}
-          releaseName: "AsuTorrent ${{ github.ref_name }}"
+          tagName: ${{ inputs.tag || github.ref_name }}
+          releaseName: "AsuTorrent ${{ inputs.tag || github.ref_name }}"
           releaseBody: |
             ## AsuTorrent ${{ github.ref_name }}
 
@@ -164,4 +164,4 @@ jobs:
             - Windows: SmartScreen may show a warning until the build is signed and trusted
             - Linux: Requires `libwebkit2gtk-4.1-dev` and `libappindicator3-dev` for the GUI
           releaseDraft: true
-          prerelease: ${{ contains(github.ref_name, '-') }}
+          prerelease: ${{ contains(inputs.tag || github.ref_name, '-') }}
