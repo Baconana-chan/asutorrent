@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Category {
@@ -35,7 +35,9 @@ pub struct AutoManagementConfig {
     pub seed_time_limit_minutes: u32,
 }
 
-fn default_ratio() -> f64 { 2.0 }
+fn default_ratio() -> f64 {
+    2.0
+}
 
 impl Default for AutoManagementConfig {
     fn default() -> Self {
@@ -123,16 +125,61 @@ impl Default for AppConfig {
         Self {
             global_download_path: None,
             categories: vec![
-                Category { id: 1, name: "Movies".into(), icon: "🎬".into(), save_path: None, auto_rule: None },
-                Category { id: 2, name: "TV".into(), icon: "📺".into(), save_path: None, auto_rule: None },
-                Category { id: 3, name: "Music".into(), icon: "🎵".into(), save_path: None, auto_rule: None },
-                Category { id: 4, name: "Games".into(), icon: "🎮".into(), save_path: None, auto_rule: None },
-                Category { id: 5, name: "Software".into(), icon: "💻".into(), save_path: None, auto_rule: None },
+                Category {
+                    id: 1,
+                    name: "Movies".into(),
+                    icon: "🎬".into(),
+                    save_path: None,
+                    auto_rule: None,
+                },
+                Category {
+                    id: 2,
+                    name: "TV".into(),
+                    icon: "📺".into(),
+                    save_path: None,
+                    auto_rule: None,
+                },
+                Category {
+                    id: 3,
+                    name: "Music".into(),
+                    icon: "🎵".into(),
+                    save_path: None,
+                    auto_rule: None,
+                },
+                Category {
+                    id: 4,
+                    name: "Games".into(),
+                    icon: "🎮".into(),
+                    save_path: None,
+                    auto_rule: None,
+                },
+                Category {
+                    id: 5,
+                    name: "Software".into(),
+                    icon: "💻".into(),
+                    save_path: None,
+                    auto_rule: None,
+                },
             ],
             tags: vec![
-                Tag { id: 1, name: "HD".into(), color: "#34d35e".into(), auto_rule: Some(r"1080p|720p".into()) },
-                Tag { id: 2, name: "4K".into(), color: "#9a7cf6".into(), auto_rule: Some(r"2160p|4K".into()) },
-                Tag { id: 3, name: "Remux".into(), color: "#f0a020".into(), auto_rule: Some(r"Remux".into()) },
+                Tag {
+                    id: 1,
+                    name: "HD".into(),
+                    color: "#34d35e".into(),
+                    auto_rule: Some(r"1080p|720p".into()),
+                },
+                Tag {
+                    id: 2,
+                    name: "4K".into(),
+                    color: "#9a7cf6".into(),
+                    auto_rule: Some(r"2160p|4K".into()),
+                },
+                Tag {
+                    id: 3,
+                    name: "Remux".into(),
+                    color: "#f0a020".into(),
+                    auto_rule: Some(r"Remux".into()),
+                },
             ],
             torrent_categories: std::collections::HashMap::new(),
             torrent_tags: std::collections::HashMap::new(),
@@ -153,28 +200,38 @@ impl Default for AppConfig {
             encryption_mode: "enabled".to_string(),
             per_torrent_encryption: std::collections::HashMap::new(),
             portfolios: vec![
-                Portfolio { id: 1, name: "Active Downloads".into(), icon: "\u{2B07}".into(), filter: "downloading".into() },
-                Portfolio { id: 2, name: "Seeding".into(), icon: "\u{2B06}".into(), filter: "seeding".into() },
+                Portfolio {
+                    id: 1,
+                    name: "Active Downloads".into(),
+                    icon: "\u{2B07}".into(),
+                    filter: "downloading".into(),
+                },
+                Portfolio {
+                    id: 2,
+                    name: "Seeding".into(),
+                    icon: "\u{2B06}".into(),
+                    filter: "seeding".into(),
+                },
             ],
             blocklist_url: None,
         }
     }
 }
 
-fn default_encryption_mode() -> String { "enabled".to_string() }
+fn default_encryption_mode() -> String {
+    "enabled".to_string()
+}
 
 impl AppConfig {
     /// Load config from JSON file, or create default.
-    pub fn load(data_dir: &PathBuf) -> Self {
+    pub fn load(data_dir: &Path) -> Self {
         let path = data_dir.join("config.json");
         if path.exists() {
             match std::fs::read_to_string(&path) {
-                Ok(content) => {
-                    match serde_json::from_str(&content) {
-                        Ok(cfg) => return cfg,
-                        Err(e) => log::warn!("Failed to parse config.json: {}. Using defaults.", e),
-                    }
-                }
+                Ok(content) => match serde_json::from_str(&content) {
+                    Ok(cfg) => return cfg,
+                    Err(e) => log::warn!("Failed to parse config.json: {}. Using defaults.", e),
+                },
                 Err(e) => log::warn!("Failed to read config.json: {}. Using defaults.", e),
             }
         }
@@ -184,7 +241,7 @@ impl AppConfig {
     }
 
     /// Save config to JSON file.
-    pub fn save(&self, data_dir: &PathBuf) -> Result<(), String> {
+    pub fn save(&self, data_dir: &Path) -> Result<(), String> {
         let path = data_dir.join("config.json");
         let content = serde_json::to_string_pretty(self).map_err(|e| e.to_string())?;
         std::fs::write(&path, content).map_err(|e| e.to_string())?;
@@ -211,10 +268,16 @@ impl AppConfig {
             }
         }
 
-        let category = self.categories.iter().find(|c| {
-            c.auto_rule.as_ref().and_then(|rule| regex::Regex::new(rule).ok())
-                .map_or(false, |re| re.is_match(name))
-        }).map(|c| c.id);
+        let category = self
+            .categories
+            .iter()
+            .find(|c| {
+                c.auto_rule
+                    .as_ref()
+                    .and_then(|rule| regex::Regex::new(rule).ok())
+                    .is_some_and(|re| re.is_match(name))
+            })
+            .map(|c| c.id);
 
         (category, tags)
     }
@@ -304,7 +367,10 @@ mod tests {
     fn test_next_portfolio_id() {
         let cfg = AppConfig::default();
         assert_eq!(cfg.next_portfolio_id(), 3);
-        let empty = AppConfig { portfolios: vec![], ..AppConfig::default() };
+        let empty = AppConfig {
+            portfolios: vec![],
+            ..AppConfig::default()
+        };
         assert_eq!(empty.next_portfolio_id(), 1);
     }
 

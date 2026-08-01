@@ -1,8 +1,12 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 
-// Mock @preact/signals to avoid requiring component context
+// Mock @preact/signals to avoid requiring component context.
+// useLocales.ts uses `signal` and `effect` at module scope, so the mock
+// must provide them (and keep useSignal for any hook usage).
 vi.mock("@preact/signals", () => ({
-  useSignal: (initial: string) => ({ value: initial }),
+  signal: (initial: unknown) => ({ value: initial }),
+  effect: () => () => {},
+  useSignal: (initial: unknown) => ({ value: initial }),
 }));
 
 // Now import the module after mocking

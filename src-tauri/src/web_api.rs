@@ -1,19 +1,20 @@
 use crate::build_clean_payload;
 use axum::{
-    Router, routing::{get, post},
-    extract::{Query, State as AxumState, Request, Path},
-    response::{Json, IntoResponse, Response},
+    body::{Body, Bytes},
+    extract::{Path, Query, Request, State as AxumState},
     http::StatusCode,
-    body::{Bytes, Body},
     middleware::{self, Next},
+    response::{IntoResponse, Json, Response},
+    routing::{get, post},
+    Router,
 };
 use serde::Deserialize;
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::net::IpAddr;
 use std::sync::{Arc, Mutex};
-use tower_http::services::ServeDir;
 use tower_http::cors::CorsLayer;
+use tower_http::services::ServeDir;
 
 const WEB_USERNAME: &str = "admin";
 const WEB_PASSWORD: &str = "adminadmin";
@@ -41,7 +42,10 @@ fn open_geo_db(data_dir: &std::path::Path) -> Option<maxminddb::Reader<Vec<u8>>>
             }
         }
     } else {
-        log::info!("No GeoIP database at {:?}. Countries labeled 'Unknown'.", path);
+        log::info!(
+            "No GeoIP database at {:?}. Countries labeled 'Unknown'.",
+            path
+        );
         None
     }
 }
@@ -64,15 +68,13 @@ fn is_global_ip(addr: IpAddr) -> Option<IpAddr> {
     match addr {
         IpAddr::V4(v4) => {
             let octets = v4.octets();
-            if octets[0] == 10 || octets[0] == 127 {
-                None
-            } else if octets[0] == 172 && (octets[1] >= 16 && octets[1] <= 31) {
-                None
-            } else if octets[0] == 192 && octets[1] == 168 {
-                None
-            } else if octets[0] == 169 && octets[1] == 254 {
-                None
-            } else if octets[0] >= 224 && octets[0] <= 239 {
+            let is_private = octets[0] == 10
+                || octets[0] == 127
+                || (octets[0] == 172 && (16..=31).contains(&octets[1]))
+                || (octets[0] == 192 && octets[1] == 168)
+                || (octets[0] == 169 && octets[1] == 254)
+                || (octets[0] >= 224 && octets[0] <= 239);
+            if is_private {
                 None
             } else {
                 Some(addr)
@@ -93,7 +95,10 @@ pub fn start_server(tm: Arc<crate::torrent_mgr::TorrentManager>) {
 
     let app = Router::new()
         // Static files — serve built frontend
-        .nest_service("/", ServeDir::new("../dist").append_index_html_on_directories(true))
+        .nest_service(
+            "/",
+            ServeDir::new("../dist").append_index_html_on_directories(true),
+        )
         // Public endpoints (no auth)
         .route("/api/v2/auth/login", post(login))
         .route("/api/v2/app/version", get(app_version))
@@ -112,11 +117,17 @@ pub fn start_server(tm: Arc<crate::torrent_mgr::TorrentManager>) {
         .route("/api/v2/app/getPreferences", get(get_preferences))
         .route("/api/v2/app/setPreferences", post(set_preferences))
         // AsuTorrent-specific endpoints
-        .route("/api/v2/torrents/stream/:torrent_id/:file_idx", get(stream_file))
+        .route(
+            "/api/v2/torrents/stream/:torrent_id/:file_idx",
+            get(stream_file),
+        )
         .route("/api/v2/peers/geo", get(peers_geo))
         .route("/api/v2/stats/speed", get(speed_history_handler))
         .route("/api/v2/peers/countries", get(peers_countries))
-        .layer(middleware::from_fn_with_state(state.clone(), auth_middleware))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            auth_middleware,
+        ))
         .layer(CorsLayer::permissive())
         .with_state(state);
 
@@ -168,16 +179,25 @@ async fn auth_middleware(
 
 fn generate_sid() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
-    let nanos = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos();
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
     format!("asutorrent_{}", nanos)
 }
 
 fn parse_form(body: &Bytes) -> HashMap<String, String> {
     let body_str = String::from_utf8_lossy(body);
-    body_str.split('&').filter_map(|pair| {
-        let mut parts = pair.splitn(2, '=');
-        Some((url_decode(parts.next()?.trim()), url_decode(parts.next().unwrap_or("").trim())))
-    }).collect()
+    body_str
+        .split('&')
+        .filter_map(|pair| {
+            let mut parts = pair.splitn(2, '=');
+            Some((
+                url_decode(parts.next()?.trim()),
+                url_decode(parts.next().unwrap_or("").trim()),
+            ))
+        })
+        .collect()
 }
 
 fn url_decode(s: &str) -> String {
@@ -200,10 +220,7 @@ fn url_decode(s: &str) -> String {
 
 // ── Public endpoints ─────────────────────────────────────────────
 
-async fn login(
-    AxumState(state): AxumState<AppState>,
-    body: Bytes,
-) -> impl IntoResponse {
+async fn login(AxumState(state): AxumState<AppState>, body: Bytes) -> impl IntoResponse {
     let params = parse_form(&body);
     let username = params.get("username").map(|s| s.as_str()).unwrap_or("");
     let password = params.get("password").map(|s| s.as_str()).unwrap_or("");
@@ -218,7 +235,11 @@ async fn login(
             "Ok.",
         )
     } else {
-        (StatusCode::UNAUTHORIZED, [(axum::http::header::SET_COOKIE, String::new())], "Unauthorized")
+        (
+            StatusCode::UNAUTHORIZED,
+            [(axum::http::header::SET_COOKIE, String::new())],
+            "Unauthorized",
+        )
     }
 }
 
@@ -252,8 +273,14 @@ struct TorrentInfoQuery {
 async fn torrents_info(
     AxumState(state): AxumState<AppState>,
     Query(query): Query<TorrentInfoQuery>,
-) -> impl IntoResponse { /* unchanged — existing handler */ 
-    let payload = build_clean_payload(&state.tm.api, &state.tm.forced_snapshot(), Some(state.tm.session_start), &state.tm.sequential_snapshot());
+) -> impl IntoResponse {
+    /* unchanged — existing handler */
+    let payload = build_clean_payload(
+        &state.tm.api,
+        &state.tm.forced_snapshot(),
+        Some(state.tm.session_start),
+        &state.tm.sequential_snapshot(),
+    );
     let mut torrents: Vec<Value> = payload["torrents"].as_array().cloned().unwrap_or_default();
 
     if let Some(ref filter) = query.filter {
@@ -280,9 +307,16 @@ async fn torrents_info(
             let categories = state.tm.get_categories();
             torrents.retain(|t| {
                 let tid = t["id"].as_u64().unwrap_or(0) as u32;
-                state.tm.get_torrent_category(tid).and_then(|cid| {
-                    categories.iter().find(|c| c.id == cid).map(|c| c.name.eq_ignore_ascii_case(cat_name))
-                }).unwrap_or(false)
+                state
+                    .tm
+                    .get_torrent_category(tid)
+                    .and_then(|cid| {
+                        categories
+                            .iter()
+                            .find(|c| c.id == cid)
+                            .map(|c| c.name.eq_ignore_ascii_case(cat_name))
+                    })
+                    .unwrap_or(false)
             });
         }
     }
@@ -295,78 +329,101 @@ async fn torrents_info(
                 let torrent_tag_ids = state.tm.get_torrent_tags(tid);
                 tag_name.split(',').any(|tn| {
                     let tn = tn.trim();
-                    tags.iter().any(|tag| tn == tag.name && torrent_tag_ids.contains(&tag.id))
+                    tags.iter()
+                        .any(|tag| tn == tag.name && torrent_tag_ids.contains(&tag.id))
                 })
             });
         }
     }
-    let payload = build_clean_payload(&state.tm.api, &state.tm.forced_snapshot(), Some(state.tm.session_start), &state.tm.sequential_snapshot());
+    let payload = build_clean_payload(
+        &state.tm.api,
+        &state.tm.forced_snapshot(),
+        Some(state.tm.session_start),
+        &state.tm.sequential_snapshot(),
+    );
     let torrents = payload["torrents"].as_array().cloned().unwrap_or_default();
 
-    let qbt_torrents: Vec<Value> = torrents.iter().map(|t| {
-        let hash = t["info_hash"].as_str().unwrap_or("");
-        let name = t["name"].as_str().unwrap_or("Unknown");
-        let total = t["stats"]["total_bytes"].as_u64().unwrap_or(0);
-        let downloaded = t["stats"]["progress_bytes"].as_u64().unwrap_or(0);
-        let uploaded = t["stats"]["uploaded_bytes"].as_u64().unwrap_or(0);
-        let st = t["stats"]["state"].as_str().unwrap_or("unknown");
-        let dl_speed = t["stats"]["live"]["download_speed"].as_u64().unwrap_or(0);
-        let ul_speed = t["stats"]["live"]["upload_speed"].as_u64().unwrap_or(0);
-        let eta = t["stats"]["live"]["time_remaining"]["secs"].as_i64().unwrap_or(-1);
-        let peers = t["stats"]["peers"].as_u64().unwrap_or(0);
-        let seeds = t["stats"]["seeds"].as_u64().unwrap_or(0);
-        let progress = if total > 0 { downloaded as f64 / total as f64 } else { 0.0 };
-        let ratio = if total > 0 { uploaded as f64 / total as f64 } else { 0.0 };
-        let ratio_val = (ratio * 1000.0).round() / 1000.0;
+    let qbt_torrents: Vec<Value> = torrents
+        .iter()
+        .map(|t| {
+            let hash = t["info_hash"].as_str().unwrap_or("");
+            let name = t["name"].as_str().unwrap_or("Unknown");
+            let total = t["stats"]["total_bytes"].as_u64().unwrap_or(0);
+            let downloaded = t["stats"]["progress_bytes"].as_u64().unwrap_or(0);
+            let uploaded = t["stats"]["uploaded_bytes"].as_u64().unwrap_or(0);
+            let st = t["stats"]["state"].as_str().unwrap_or("unknown");
+            let dl_speed = t["stats"]["live"]["download_speed"].as_u64().unwrap_or(0);
+            let ul_speed = t["stats"]["live"]["upload_speed"].as_u64().unwrap_or(0);
+            let eta = t["stats"]["live"]["time_remaining"]["secs"]
+                .as_i64()
+                .unwrap_or(-1);
+            let peers = t["stats"]["peers"].as_u64().unwrap_or(0);
+            let seeds = t["stats"]["seeds"].as_u64().unwrap_or(0);
+            let progress = if total > 0 {
+                downloaded as f64 / total as f64
+            } else {
+                0.0
+            };
+            let ratio = if total > 0 {
+                uploaded as f64 / total as f64
+            } else {
+                0.0
+            };
+            let ratio_val = (ratio * 1000.0).round() / 1000.0;
 
-        let qbt_state = match st {
-            "downloading" => "downloading",
-            "seeding" => "uploading",
-            "paused" => "pausedDL",
-            "error" => "error",
-            "metadata" => "metaDL",
-            _ => "unknown",
-        };
+            let qbt_state = match st {
+                "downloading" => "downloading",
+                "seeding" => "uploading",
+                "paused" => "pausedDL",
+                "error" => "error",
+                "metadata" => "metaDL",
+                _ => "unknown",
+            };
 
-        serde_json::json!({
-            "hash": hash, "name": name, "size": total,
-            "completed": downloaded, "uploaded": uploaded,
-            "dl_speed": dl_speed, "up_speed": ul_speed,
-            "progress": (progress * 1000.0).round() as u64,
-            "amount_left": total.saturating_sub(downloaded),
-            "state": qbt_state, "eta": eta,
-            "num_leechs": peers, "num_seeds": seeds,
-            "ratio": ratio_val,
-            "priority": 0, "added_on": 0, "completion_on": 0,
-            "save_path": "", "category": "", "tags": "", "download_path": "",
-            "inactive_seeding_time_limit": 0, "seed_num": 0,
-            "f_l_piece_prio": false,
-            "force_start": t["forced"].as_bool().unwrap_or(false),
-            "up_limit": -1, "dl_limit": -1,
-            "max_ratio": -1, "max_seeding_time": -1, "max_inactive_seeding_time": -1,
+            serde_json::json!({
+                "hash": hash, "name": name, "size": total,
+                "completed": downloaded, "uploaded": uploaded,
+                "dl_speed": dl_speed, "up_speed": ul_speed,
+                "progress": (progress * 1000.0).round() as u64,
+                "amount_left": total.saturating_sub(downloaded),
+                "state": qbt_state, "eta": eta,
+                "num_leechs": peers, "num_seeds": seeds,
+                "ratio": ratio_val,
+                "priority": 0, "added_on": 0, "completion_on": 0,
+                "save_path": "", "category": "", "tags": "", "download_path": "",
+                "inactive_seeding_time_limit": 0, "seed_num": 0,
+                "f_l_piece_prio": false,
+                "force_start": t["forced"].as_bool().unwrap_or(false),
+                "up_limit": -1, "dl_limit": -1,
+                "max_ratio": -1, "max_seeding_time": -1, "max_inactive_seeding_time": -1,
+            })
         })
-    }).collect();
+        .collect();
 
     Json(qbt_torrents).into_response()
 }
 
-async fn torrents_add(
-    AxumState(state): AxumState<AppState>,
-    body: Bytes,
-) -> impl IntoResponse {
+async fn torrents_add(AxumState(state): AxumState<AppState>, body: Bytes) -> impl IntoResponse {
     let params = parse_form(&body);
     let urls = params.get("urls").map(|s| s.as_str()).unwrap_or("");
     let category_name = params.get("category").map(|s| s.as_str()).unwrap_or("");
 
     let cat_id = if !category_name.is_empty() {
-        state.tm.get_categories().iter().find(|c| c.name.eq_ignore_ascii_case(category_name)).map(|c| c.id)
+        state
+            .tm
+            .get_categories()
+            .iter()
+            .find(|c| c.name.eq_ignore_ascii_case(category_name))
+            .map(|c| c.id)
     } else {
         None
     };
 
     for url in urls.split('\n') {
         let url = url.trim();
-        if url.is_empty() { continue; }
+        if url.is_empty() {
+            continue;
+        }
         if url.starts_with("magnet:") || url.starts_with("http://") || url.starts_with("https://") {
             match state.tm.add_magnet(url).await {
                 Ok(id) => {
@@ -383,37 +440,37 @@ async fn torrents_add(
     (StatusCode::OK, "Ok.").into_response()
 }
 
-async fn torrents_pause(
-    AxumState(state): AxumState<AppState>,
-    body: Bytes,
-) -> impl IntoResponse {
+async fn torrents_pause(AxumState(state): AxumState<AppState>, body: Bytes) -> impl IntoResponse {
     let params = parse_form(&body);
     let hashes = params.get("hashes").map(|s| s.as_str()).unwrap_or("all");
     let ids = resolve_hashes(&state, hashes);
-    for id in ids { let _ = state.tm.pause(id).await; }
+    for id in ids {
+        let _ = state.tm.pause(id).await;
+    }
     (StatusCode::OK, "Ok.").into_response()
 }
 
-async fn torrents_resume(
-    AxumState(state): AxumState<AppState>,
-    body: Bytes,
-) -> impl IntoResponse {
+async fn torrents_resume(AxumState(state): AxumState<AppState>, body: Bytes) -> impl IntoResponse {
     let params = parse_form(&body);
     let hashes = params.get("hashes").map(|s| s.as_str()).unwrap_or("all");
     let ids = resolve_hashes(&state, hashes);
-    for id in ids { let _ = state.tm.resume(id).await; }
+    for id in ids {
+        let _ = state.tm.resume(id).await;
+    }
     (StatusCode::OK, "Ok.").into_response()
 }
 
-async fn torrents_delete(
-    AxumState(state): AxumState<AppState>,
-    body: Bytes,
-) -> impl IntoResponse {
+async fn torrents_delete(AxumState(state): AxumState<AppState>, body: Bytes) -> impl IntoResponse {
     let params = parse_form(&body);
     let hashes = params.get("hashes").map(|s| s.as_str()).unwrap_or("");
-    let delete_files = params.get("deleteFiles").map(|s| s == "true").unwrap_or(false);
+    let delete_files = params
+        .get("deleteFiles")
+        .map(|s| s == "true")
+        .unwrap_or(false);
     let ids = resolve_hashes(&state, hashes);
-    for id in ids { let _ = state.tm.delete(id, delete_files).await; }
+    for id in ids {
+        let _ = state.tm.delete(id, delete_files).await;
+    }
     (StatusCode::OK, "Ok.").into_response()
 }
 
@@ -433,7 +490,12 @@ async fn torrents_set_category(
     let cat_id = if category.is_empty() {
         None
     } else {
-        state.tm.get_categories().iter().find(|c| c.name.eq_ignore_ascii_case(category)).map(|c| c.id)
+        state
+            .tm
+            .get_categories()
+            .iter()
+            .find(|c| c.name.eq_ignore_ascii_case(category))
+            .map(|c| c.id)
     };
 
     let ids = resolve_hashes(&state, hashes);
@@ -456,14 +518,17 @@ async fn torrents_files(
         Ok(details) => {
             let val = serde_json::to_value(&details).unwrap_or_default();
             let files = val["files"].as_array().cloned().unwrap_or_default();
-            let qbt_files: Vec<Value> = files.iter().map(|f| {
-                serde_json::json!({
-                    "index": f["index"], "name": f["name"],
-                    "size": f["length"], "progress": 1.0,
-                    "priority": 0, "is_seed": false,
-                    "piece_range": [], "availability": 1.0,
+            let qbt_files: Vec<Value> = files
+                .iter()
+                .map(|f| {
+                    serde_json::json!({
+                        "index": f["index"], "name": f["name"],
+                        "size": f["length"], "progress": 1.0,
+                        "priority": 0, "is_seed": false,
+                        "piece_range": [], "availability": 1.0,
+                    })
                 })
-            }).collect();
+                .collect();
             Json(qbt_files).into_response()
         }
         Err(_) => Json(serde_json::json!([])).into_response(),
@@ -479,11 +544,22 @@ async fn torrents_properties(
     AxumState(state): AxumState<AppState>,
     Query(query): Query<TorrentPropsQuery>,
 ) -> impl IntoResponse {
-    let payload = build_clean_payload(&state.tm.api, &state.tm.forced_snapshot(), Some(state.tm.session_start), &state.tm.sequential_snapshot());
+    let payload = build_clean_payload(
+        &state.tm.api,
+        &state.tm.forced_snapshot(),
+        Some(state.tm.session_start),
+        &state.tm.sequential_snapshot(),
+    );
     let torrents = payload["torrents"].as_array().cloned().unwrap_or_default();
     let t = torrents.iter().find(|t| {
-        t["info_hash"].as_str().map(|h| h == query.hash).unwrap_or(false)
-            || t["id"].as_u64().map(|id| id.to_string() == query.hash).unwrap_or(false)
+        t["info_hash"]
+            .as_str()
+            .map(|h| h == query.hash)
+            .unwrap_or(false)
+            || t["id"]
+                .as_u64()
+                .map(|id| id.to_string() == query.hash)
+                .unwrap_or(false)
     });
 
     match t {
@@ -495,9 +571,19 @@ async fn torrents_properties(
             let ul_speed = t["stats"]["live"]["upload_speed"].as_u64().unwrap_or(0);
             let peers = t["stats"]["peers"].as_u64().unwrap_or(0);
             let seeds = t["stats"]["seeds"].as_u64().unwrap_or(0);
-            let eta = t["stats"]["live"]["time_remaining"]["secs"].as_i64().unwrap_or(-1);
-            let ratio = if total > 0 { uploaded as f64 / total as f64 } else { 0.0 };
-            let progress = if total > 0 { downloaded as f64 / total as f64 } else { 0.0 };
+            let eta = t["stats"]["live"]["time_remaining"]["secs"]
+                .as_i64()
+                .unwrap_or(-1);
+            let ratio = if total > 0 {
+                uploaded as f64 / total as f64
+            } else {
+                0.0
+            };
+            let progress = if total > 0 {
+                downloaded as f64 / total as f64
+            } else {
+                0.0
+            };
             let share_ratio = (ratio * 1000.0).round() / 1000.0;
 
             Json(serde_json::json!({
@@ -513,17 +599,23 @@ async fn torrents_properties(
                 "eta": eta, "completed": (progress * 100.0).round() as u64,
                 "max_ratio": -1, "max_seeding_time": -1,
                 "max_inactive_seeding_time": -1, "seen_complete": 0,
-            })).into_response()
+            }))
+            .into_response()
         }
         None => Json(serde_json::json!({})).into_response(),
     }
 }
 
-async fn get_preferences(
-    AxumState(state): AxumState<AppState>,
-) -> impl IntoResponse {
+async fn get_preferences(AxumState(state): AxumState<AppState>) -> impl IntoResponse {
     let limits = state.tm.limits.lock().unwrap();
-    let dl_path = state.tm.config.lock().unwrap().global_download_path.clone().unwrap_or_default();
+    let dl_path = state
+        .tm
+        .config
+        .lock()
+        .unwrap()
+        .global_download_path
+        .clone()
+        .unwrap_or_default();
     let queue = state.tm.queue.lock().unwrap().clone();
     Json(serde_json::json!({
         "save_path": dl_path,
@@ -546,15 +638,18 @@ async fn set_preferences(
 
 // ── Prometheus Metrics ───────────────────────────────────────────
 
-async fn metrics_handler(
-    AxumState(state): AxumState<AppState>,
-) -> impl IntoResponse {
+async fn metrics_handler(AxumState(state): AxumState<AppState>) -> impl IntoResponse {
     use core::fmt::Write;
     let mut output = String::new();
     let forced = state.tm.forced_snapshot();
 
     // Get the payload that the frontend already uses — this gives us all stats
-    let payload = build_clean_payload(&state.tm.api, &forced, Some(state.tm.session_start), &state.tm.sequential_snapshot());
+    let payload = build_clean_payload(
+        &state.tm.api,
+        &forced,
+        Some(state.tm.session_start),
+        &state.tm.sequential_snapshot(),
+    );
     let torrents = payload["torrents"].as_array().cloned().unwrap_or_default();
     let stats = &payload["stats"];
 
@@ -565,7 +660,8 @@ async fn metrics_handler(
     let active_seed = stats["active_seeds"].as_u64().unwrap_or(0);
     let total_torrents = torrents.len();
 
-    let _ = writeln!(&mut output,
+    let _ = writeln!(
+        &mut output,
         "# HELP asutorrent_download_speed_bytes Download speed in bytes/sec\n\
          # TYPE asutorrent_download_speed_bytes gauge\n\
          asutorrent_download_speed_bytes {dl}\n\
@@ -617,16 +713,22 @@ async fn metrics_handler(
     // ── Try to get DHT info ───────────────────────────────────────
     if let Ok(dht_stats) = state.tm.api.api_dht_stats() {
         let dht_val = serde_json::to_value(&dht_stats).unwrap_or_default();
-        let _ = writeln!(&mut output,
+        let _ = writeln!(
+            &mut output,
             "# HELP asutorrent_dht_active DHT active\n\
              # TYPE asutorrent_dht_active gauge\n\
              asutorrent_dht_active {dht_val}"
         );
     }
 
-    (StatusCode::OK, [
-        (axum::http::header::CONTENT_TYPE, "text/plain; version=0.0.4; charset=utf-8"),
-    ], output)
+    (
+        StatusCode::OK,
+        [(
+            axum::http::header::CONTENT_TYPE,
+            "text/plain; version=0.0.4; charset=utf-8",
+        )],
+        output,
+    )
 }
 
 // ── Stream Video/Audio Files (Range requests) ────────────────────
@@ -671,10 +773,17 @@ async fn stream_file(
     headers: axum::http::HeaderMap,
 ) -> Response {
     // 1. Resolve torrent name + download directory
-    let torrent_list = state.tm.api.api_torrent_list_ext(librqbit::api::ApiTorrentListOpts { with_stats: true });
+    let torrent_list = state
+        .tm
+        .api
+        .api_torrent_list_ext(librqbit::api::ApiTorrentListOpts { with_stats: true });
     let list_val = serde_json::to_value(&torrent_list).unwrap_or_default();
-    let torrent = list_val["torrents"].as_array()
-        .and_then(|arr| arr.iter().find(|t| t["id"].as_u64() == Some(torrent_id as u64)))
+    let torrent = list_val["torrents"]
+        .as_array()
+        .and_then(|arr| {
+            arr.iter()
+                .find(|t| t["id"].as_u64() == Some(torrent_id as u64))
+        })
         .cloned();
 
     let (torrent_name, info_hash) = match torrent {
@@ -689,7 +798,11 @@ async fn stream_file(
 
     // Skip synthetic HTTP download entries
     if info_hash.starts_with("http_") {
-        return (StatusCode::BAD_REQUEST, "Cannot stream HTTP download entries").into_response();
+        return (
+            StatusCode::BAD_REQUEST,
+            "Cannot stream HTTP download entries",
+        )
+            .into_response();
     }
 
     // 2. Get file details from API
@@ -713,7 +826,10 @@ async fn stream_file(
     // 3. Build the full file path
     let download_dir = {
         let cfg = state.tm.config.lock().unwrap();
-        std::path::PathBuf::from(cfg.effective_path(None).unwrap_or_else(|| state.tm.data_dir.to_string_lossy().to_string()))
+        std::path::PathBuf::from(
+            cfg.effective_path(None)
+                .unwrap_or_else(|| state.tm.data_dir.to_string_lossy().to_string()),
+        )
     };
 
     let full_path = download_dir.join(&torrent_name).join(file_relative_path);
@@ -726,7 +842,7 @@ async fn stream_file(
         if flat.exists() {
             flat
         } else {
-            return (StatusCode::NOT_FOUND, format!("File not found on disk")).into_response();
+            return (StatusCode::NOT_FOUND, "File not found on disk".to_string()).into_response();
         }
     };
 
@@ -771,12 +887,17 @@ async fn stream_file(
     // 7. Open file and create streaming body
     let file = match tokio::fs::File::open(&full_path).await {
         Ok(f) => f,
-        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to open file").into_response(),
+        Err(_) => {
+            return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to open file").into_response()
+        }
     };
 
     // Seek to the start position
     let mut file = file;
-    if tokio::io::AsyncSeekExt::seek(&mut file, std::io::SeekFrom::Start(start)).await.is_err() {
+    if tokio::io::AsyncSeekExt::seek(&mut file, std::io::SeekFrom::Start(start))
+        .await
+        .is_err()
+    {
         return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to seek in file").into_response();
     }
 
@@ -790,10 +911,7 @@ async fn stream_file(
         axum::http::header::CONTENT_TYPE,
         content_type.parse().unwrap(),
     );
-    response_headers.insert(
-        axum::http::header::ACCEPT_RANGES,
-        "bytes".parse().unwrap(),
-    );
+    response_headers.insert(axum::http::header::ACCEPT_RANGES, "bytes".parse().unwrap());
     response_headers.insert(
         "Content-Length",
         content_length.to_string().parse().unwrap(),
@@ -802,7 +920,9 @@ async fn stream_file(
     if status == StatusCode::PARTIAL_CONTENT {
         response_headers.insert(
             "Content-Range",
-            format!("bytes {}-{}/{}", start, end, file_size).parse().unwrap(),
+            format!("bytes {}-{}/{}", start, end, file_size)
+                .parse()
+                .unwrap(),
         );
     }
 
@@ -827,7 +947,12 @@ async fn speed_history_handler(
         _ => 3600, // hour (default)
     };
 
-    let samples = state.tm.speed_history.lock().unwrap().get_samples(period_secs);
+    let samples = state
+        .tm
+        .speed_history
+        .lock()
+        .unwrap()
+        .get_samples(period_secs);
     Json(serde_json::json!({
         "period": query.period.as_deref().unwrap_or("hour"),
         "period_secs": period_secs,
@@ -839,16 +964,17 @@ async fn speed_history_handler(
 
 /// Return per-country peer & traffic statistics.
 /// Uses MaxMind GeoLite2 DB if available (cached in AppState), otherwise "Unknown".
-async fn peers_countries(
-    AxumState(state): AxumState<AppState>,
-) -> impl IntoResponse {
+async fn peers_countries(AxumState(state): AxumState<AppState>) -> impl IntoResponse {
     use crate::torrent_mgr::CountryTraffic;
 
     let geo_db = &*state.geo_db;
     let mut country_data: HashMap<String, CountryTraffic> = HashMap::new();
     let mut total_peers_found: u64 = 0;
 
-    let list = state.tm.api.api_torrent_list_ext(librqbit::api::ApiTorrentListOpts { with_stats: true });
+    let list = state
+        .tm
+        .api
+        .api_torrent_list_ext(librqbit::api::ApiTorrentListOpts { with_stats: true });
     for t in &list.torrents {
         let Some(ref id) = t.id else { continue };
         let idx = librqbit::api::TorrentIdOrHash::Id(*id);
@@ -862,19 +988,22 @@ async fn peers_countries(
                         let ip: Option<IpAddr> = ip_str.parse().ok();
                         let global_ip = ip.and_then(is_global_ip);
 
-                        let country = if let (Some(ref reader), Some(ref ip)) = (geo_db, global_ip) {
+                        let country = if let (Some(ref reader), Some(ref ip)) = (geo_db, global_ip)
+                        {
                             ip_to_country(reader, *ip).unwrap_or_else(|| "Unknown".to_string())
                         } else {
                             "Unknown".to_string()
                         };
 
-                        let entry = country_data.entry(country.clone()).or_insert(CountryTraffic {
-                            country_code: country,
-                            peer_count: 0,
-                            download_bytes: 0,
-                            upload_bytes: 0,
-                            last_seen: 0,
-                        });
+                        let entry = country_data
+                            .entry(country.clone())
+                            .or_insert(CountryTraffic {
+                                country_code: country,
+                                peer_count: 0,
+                                download_bytes: 0,
+                                upload_bytes: 0,
+                                last_seen: 0,
+                            });
                         entry.peer_count += 1;
                     }
                 }
@@ -883,7 +1012,7 @@ async fn peers_countries(
     }
 
     let mut countries: Vec<CountryTraffic> = country_data.into_values().collect();
-    countries.sort_by(|a, b| b.peer_count.cmp(&a.peer_count));
+    countries.sort_by_key(|b| std::cmp::Reverse(b.peer_count));
 
     Json(serde_json::json!({
         "total_peers": total_peers_found,
@@ -895,11 +1024,14 @@ async fn peers_countries(
 
 /// Return geo-distribution of all peers across all torrents.
 /// This uses the peer counts we already track in the stats payload.
-async fn peers_geo(
-    AxumState(state): AxumState<AppState>,
-) -> impl IntoResponse {
+async fn peers_geo(AxumState(state): AxumState<AppState>) -> impl IntoResponse {
     let forced = state.tm.forced_snapshot();
-    let payload = build_clean_payload(&state.tm.api, &forced, Some(state.tm.session_start), &state.tm.sequential_snapshot());
+    let payload = build_clean_payload(
+        &state.tm.api,
+        &forced,
+        Some(state.tm.session_start),
+        &state.tm.sequential_snapshot(),
+    );
     let torrents = payload["torrents"].as_array().cloned().unwrap_or_default();
 
     // Build per-torrent peer list (total counts, not per-IP since we use the JSON payload)
@@ -931,22 +1063,40 @@ async fn peers_geo(
 // ── Helper: resolve hashes ───────────────────────────────────────
 
 fn resolve_hashes(state: &AppState, hashes: &str) -> Vec<u32> {
-    let payload = build_clean_payload(&state.tm.api, &state.tm.forced_snapshot(), Some(state.tm.session_start), &state.tm.sequential_snapshot());
+    let payload = build_clean_payload(
+        &state.tm.api,
+        &state.tm.forced_snapshot(),
+        Some(state.tm.session_start),
+        &state.tm.sequential_snapshot(),
+    );
     let torrents = payload["torrents"].as_array().cloned().unwrap_or_default();
 
     if hashes == "all" {
-        return torrents.iter().filter_map(|t| t["id"].as_u64().map(|id| id as u32)).collect();
+        return torrents
+            .iter()
+            .filter_map(|t| t["id"].as_u64().map(|id| id as u32))
+            .collect();
     }
 
-    let hash_list: Vec<&str> = hashes.split('|').map(|s| s.trim()).filter(|s| !s.is_empty()).collect();
-    torrents.iter().filter_map(|t| {
-        let id = t["id"].as_u64()? as u32;
-        let info_hash = t["info_hash"].as_str().unwrap_or("");
-        let id_str = id.to_string();
-        if hash_list.contains(&"all") || hash_list.contains(&info_hash) || hash_list.contains(&id_str.as_str()) {
-            Some(id)
-        } else {
-            None
-        }
-    }).collect()
+    let hash_list: Vec<&str> = hashes
+        .split('|')
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .collect();
+    torrents
+        .iter()
+        .filter_map(|t| {
+            let id = t["id"].as_u64()? as u32;
+            let info_hash = t["info_hash"].as_str().unwrap_or("");
+            let id_str = id.to_string();
+            if hash_list.contains(&"all")
+                || hash_list.contains(&info_hash)
+                || hash_list.contains(&id_str.as_str())
+            {
+                Some(id)
+            } else {
+                None
+            }
+        })
+        .collect()
 }

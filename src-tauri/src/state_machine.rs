@@ -27,7 +27,6 @@
 ///
 /// Any state → Error (on error event)
 /// Error → Paused (user acknowledges)
-
 use serde::{Deserialize, Serialize};
 
 /// All possible states a torrent can be in, with their valid transitions.
@@ -92,7 +91,7 @@ impl TorrentState {
     /// Returns `Ok(())` if the transition is valid, `Err(message)` otherwise.
     pub fn can_transition_to(self, target: TorrentState) -> Result<(), String> {
         if self == target {
-            return Ok(());  // Same state is always allowed (idempotent actions)
+            return Ok(()); // Same state is always allowed (idempotent actions)
         }
 
         // Error is a sink state: any state can transition to error
@@ -180,60 +179,107 @@ mod tests {
     #[test]
     fn test_valid_transitions() {
         // Metadata → Downloading
-        assert!(TorrentState::Metadata.can_transition_to(TorrentState::Downloading).is_ok());
+        assert!(TorrentState::Metadata
+            .can_transition_to(TorrentState::Downloading)
+            .is_ok());
 
         // Downloading → Seeding
-        assert!(TorrentState::Downloading.can_transition_to(TorrentState::Seeding).is_ok());
+        assert!(TorrentState::Downloading
+            .can_transition_to(TorrentState::Seeding)
+            .is_ok());
 
         // Downloading → Paused
-        assert!(TorrentState::Downloading.can_transition_to(TorrentState::Paused).is_ok());
+        assert!(TorrentState::Downloading
+            .can_transition_to(TorrentState::Paused)
+            .is_ok());
 
         // Seeding → Paused
-        assert!(TorrentState::Seeding.can_transition_to(TorrentState::Paused).is_ok());
+        assert!(TorrentState::Seeding
+            .can_transition_to(TorrentState::Paused)
+            .is_ok());
 
         // Paused → Downloading
-        assert!(TorrentState::Paused.can_transition_to(TorrentState::Downloading).is_ok());
+        assert!(TorrentState::Paused
+            .can_transition_to(TorrentState::Downloading)
+            .is_ok());
 
         // Paused → Seeding
-        assert!(TorrentState::Paused.can_transition_to(TorrentState::Seeding).is_ok());
+        assert!(TorrentState::Paused
+            .can_transition_to(TorrentState::Seeding)
+            .is_ok());
 
         // Any → Error
-        assert!(TorrentState::Downloading.can_transition_to(TorrentState::Error).is_ok());
-        assert!(TorrentState::Seeding.can_transition_to(TorrentState::Error).is_ok());
-        assert!(TorrentState::Paused.can_transition_to(TorrentState::Error).is_ok());
+        assert!(TorrentState::Downloading
+            .can_transition_to(TorrentState::Error)
+            .is_ok());
+        assert!(TorrentState::Seeding
+            .can_transition_to(TorrentState::Error)
+            .is_ok());
+        assert!(TorrentState::Paused
+            .can_transition_to(TorrentState::Error)
+            .is_ok());
 
         // Error → Paused
-        assert!(TorrentState::Error.can_transition_to(TorrentState::Paused).is_ok());
+        assert!(TorrentState::Error
+            .can_transition_to(TorrentState::Paused)
+            .is_ok());
 
         // Same state
-        assert!(TorrentState::Downloading.can_transition_to(TorrentState::Downloading).is_ok());
+        assert!(TorrentState::Downloading
+            .can_transition_to(TorrentState::Downloading)
+            .is_ok());
     }
 
     #[test]
     fn test_invalid_transitions() {
         // Metadata → Seeding (can't skip downloading)
-        assert!(TorrentState::Metadata.can_transition_to(TorrentState::Seeding).is_err());
+        assert!(TorrentState::Metadata
+            .can_transition_to(TorrentState::Seeding)
+            .is_err());
 
         // Metadata → Paused (now valid — user can pause during metadata fetch)
-        assert!(TorrentState::Metadata.can_transition_to(TorrentState::Paused).is_ok());
+        assert!(TorrentState::Metadata
+            .can_transition_to(TorrentState::Paused)
+            .is_ok());
 
         // Seeding → Downloading (can't go back)
-        assert!(TorrentState::Seeding.can_transition_to(TorrentState::Downloading).is_err());
+        assert!(TorrentState::Seeding
+            .can_transition_to(TorrentState::Downloading)
+            .is_err());
 
         // Paused → Metadata (can't go back)
-        assert!(TorrentState::Paused.can_transition_to(TorrentState::Metadata).is_err());
+        assert!(TorrentState::Paused
+            .can_transition_to(TorrentState::Metadata)
+            .is_err());
 
         // Unknown → Seeding (can't skip states)
-        assert!(TorrentState::Unknown.can_transition_to(TorrentState::Seeding).is_err());
+        assert!(TorrentState::Unknown
+            .can_transition_to(TorrentState::Seeding)
+            .is_err());
     }
 
     #[test]
     fn test_from_librqbit() {
-        assert_eq!(TorrentState::from_librqbit("live", false), TorrentState::Downloading);
-        assert_eq!(TorrentState::from_librqbit("live", true), TorrentState::Seeding);
-        assert_eq!(TorrentState::from_librqbit("paused", false), TorrentState::Paused);
-        assert_eq!(TorrentState::from_librqbit("error", false), TorrentState::Error);
-        assert_eq!(TorrentState::from_librqbit("initializing", false), TorrentState::Metadata);
+        assert_eq!(
+            TorrentState::from_librqbit("live", false),
+            TorrentState::Downloading
+        );
+        assert_eq!(
+            TorrentState::from_librqbit("live", true),
+            TorrentState::Seeding
+        );
+        assert_eq!(
+            TorrentState::from_librqbit("paused", false),
+            TorrentState::Paused
+        );
+        assert_eq!(
+            TorrentState::from_librqbit("error", false),
+            TorrentState::Error
+        );
+        assert_eq!(
+            TorrentState::from_librqbit("initializing", false),
+            TorrentState::Metadata
+        );
     }
 
     #[test]

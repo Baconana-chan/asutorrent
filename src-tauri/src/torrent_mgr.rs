@@ -1,5 +1,7 @@
+use crate::state_machine::TorrentState;
 use anyhow::{Context, Result};
-use librqbit::api::{Api, ApiTorrentListOpts, TorrentIdOrHash, TorrentDetailsResponse};
+use chrono::{Local, Timelike};
+use librqbit::api::{Api, ApiTorrentListOpts, TorrentDetailsResponse, TorrentIdOrHash};
 use librqbit::limits::LimitsConfig;
 use librqbit::{AddTorrent, AddTorrentOptions, ManagedTorrent, Session, SessionOptions};
 use serde::{Deserialize, Serialize};
@@ -8,8 +10,6 @@ use std::collections::{HashMap, HashSet};
 use std::num::NonZeroU32;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
-use chrono::{Local, Timelike};
-use crate::state_machine::TorrentState;
 
 // ── Speed History ────────────────────────────────────────────────
 
@@ -43,7 +43,11 @@ impl SpeedHistory {
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())
             .unwrap_or(0);
-        let sample = SpeedSample { timestamp, dl_bytes, ul_bytes };
+        let sample = SpeedSample {
+            timestamp,
+            dl_bytes,
+            ul_bytes,
+        };
         if self.raw_samples.len() >= Self::MAX_RAW_SAMPLES {
             self.raw_samples.pop_front();
         }
@@ -61,7 +65,11 @@ impl SpeedHistory {
         let cutoff = now.saturating_sub(period_secs);
 
         // Collect relevant samples
-        let relevant: Vec<&SpeedSample> = self.raw_samples.iter().filter(|s| s.timestamp >= cutoff).collect();
+        let relevant: Vec<&SpeedSample> = self
+            .raw_samples
+            .iter()
+            .filter(|s| s.timestamp >= cutoff)
+            .collect();
         if relevant.is_empty() {
             return vec![];
         }
@@ -88,15 +96,19 @@ impl SpeedHistory {
             .iter()
             .filter(|(_, samples)| !samples.is_empty())
             .map(|(_, samples)| {
-                let mid_ts = samples.iter().map(|s| s.timestamp).sum::<u64>() / samples.len() as u64;
+                let mid_ts =
+                    samples.iter().map(|s| s.timestamp).sum::<u64>() / samples.len() as u64;
                 let avg_dl = samples.iter().map(|s| s.dl_bytes).sum::<u64>() / samples.len() as u64;
                 let avg_ul = samples.iter().map(|s| s.ul_bytes).sum::<u64>() / samples.len() as u64;
-                SpeedSample { timestamp: mid_ts, dl_bytes: avg_dl, ul_bytes: avg_ul }
+                SpeedSample {
+                    timestamp: mid_ts,
+                    dl_bytes: avg_dl,
+                    ul_bytes: avg_ul,
+                }
             })
             .collect()
     }
 }
-
 
 /// Queue configuration — limits on concurrent downloads/seeds.
 #[derive(Debug, Clone)]
@@ -106,43 +118,67 @@ pub struct QueueConfig {
 }
 
 impl Default for QueueConfig {
-    fn default() -> Self { Self { max_active_downloads: 5, max_active_seeds: 3 } }
+    fn default() -> Self {
+        Self {
+            max_active_downloads: 5,
+            max_active_seeds: 3,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScheduleRule {
     pub days: Vec<u8>,
-    pub start_hour: u8, pub start_minute: u8,
-    pub end_hour: u8, pub end_minute: u8,
-    pub download_limit: Option<u32>, pub upload_limit: Option<u32>,
+    pub start_hour: u8,
+    pub start_minute: u8,
+    pub end_hour: u8,
+    pub end_minute: u8,
+    pub download_limit: Option<u32>,
+    pub upload_limit: Option<u32>,
 }
 
 impl ScheduleRule {
     fn matches(&self, weekday: u8, hour: u8, minute: u8) -> bool {
-        if !self.days.is_empty() && !self.days.contains(&weekday) { return false; }
+        if !self.days.is_empty() && !self.days.contains(&weekday) {
+            return false;
+        }
         let now = hour as u32 * 60 + minute as u32;
         let s = self.start_hour as u32 * 60 + self.start_minute as u32;
         let e = self.end_hour as u32 * 60 + self.end_minute as u32;
-        if e > s { now >= s && now < e } else { now >= s || now < e }
+        if e > s {
+            now >= s && now < e
+        } else {
+            now >= s || now < e
+        }
     }
 }
 
 pub struct SpeedLimits {
-    pub normal_download: Option<u32>, pub normal_upload: Option<u32>,
-    pub saved_normal_download: Option<u32>, pub saved_normal_upload: Option<u32>,
-    pub turtle_download: Option<u32>, pub turtle_upload: Option<u32>,
+    pub normal_download: Option<u32>,
+    pub normal_upload: Option<u32>,
+    pub saved_normal_download: Option<u32>,
+    pub saved_normal_upload: Option<u32>,
+    pub turtle_download: Option<u32>,
+    pub turtle_upload: Option<u32>,
     pub turtle_mode: bool,
-    pub schedule_enabled: bool, pub schedule_rules: Vec<ScheduleRule>, pub schedule_active: bool,
+    pub schedule_enabled: bool,
+    pub schedule_rules: Vec<ScheduleRule>,
+    pub schedule_active: bool,
 }
 
 impl SpeedLimits {
     pub fn new() -> Self {
         Self {
-            normal_download: None, normal_upload: None,
-            saved_normal_download: None, saved_normal_upload: None,
-            turtle_download: Some(1024 * 1024), turtle_upload: Some(512 * 1024),
+            normal_download: None,
+            normal_upload: None,
+            saved_normal_download: None,
+            saved_normal_upload: None,
+            turtle_download: Some(1024 * 1024),
+            turtle_upload: Some(512 * 1024),
             turtle_mode: false,
-            schedule_enabled: false, schedule_rules: vec![], schedule_active: false,
+            schedule_enabled: false,
+            schedule_rules: vec![],
+            schedule_active: false,
         }
     }
 }
@@ -151,32 +187,45 @@ impl SpeedLimits {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RssFeed {
-    pub id: u32, pub name: String, pub url: String,
-    pub interval_secs: u64, pub filters: Vec<RssFilter>,
+    pub id: u32,
+    pub name: String,
+    pub url: String,
+    pub interval_secs: u64,
+    pub filters: Vec<RssFilter>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RssFilter {
-    pub id: u32, pub name_regex: String,
-    pub min_size: Option<u64>, pub max_size: Option<u64>,
+    pub id: u32,
+    pub name_regex: String,
+    pub min_size: Option<u64>,
+    pub max_size: Option<u64>,
     pub add_torrent: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RssItem {
-    pub title: String, pub link: String,
-    pub size: Option<u64>, pub pub_date: Option<String>,
+    pub title: String,
+    pub link: String,
+    pub size: Option<u64>,
+    pub pub_date: Option<String>,
 }
 
 pub struct RssState {
     pub feeds: Vec<RssFeed>,
     pub seen_links: HashSet<String>,
-    pub next_feed_id: u32, pub next_filter_id: u32,
+    pub next_feed_id: u32,
+    pub next_filter_id: u32,
 }
 
 impl RssState {
     fn new() -> Self {
-        Self { feeds: vec![], seen_links: HashSet::new(), next_feed_id: 1, next_filter_id: 1 }
+        Self {
+            feeds: vec![],
+            seen_links: HashSet::new(),
+            next_feed_id: 1,
+            next_filter_id: 1,
+        }
     }
 }
 
@@ -199,7 +248,7 @@ pub struct TorrentHistoryEntry {
     pub info_hash: String,
     pub total_bytes: u64,
     pub uploaded_bytes: u64,
-    pub event: String, // "completed" or "deleted"
+    pub event: String,  // "completed" or "deleted"
     pub timestamp: u64, // Unix seconds
     pub category_name: Option<String>,
     pub completed_at: Option<u64>, // When the download first completed
@@ -270,7 +319,10 @@ impl TorrentManager {
 
         // Load config before creating session (config has download path)
         let cfg = crate::config::AppConfig::load(&data_dir);
-        let download_path = cfg.effective_path(None).map(PathBuf::from).unwrap_or_else(|| data_dir.clone());
+        let download_path = cfg
+            .effective_path(None)
+            .map(PathBuf::from)
+            .unwrap_or_else(|| data_dir.clone());
 
         let opts = SessionOptions {
             listen_port_range: Some(6881..6889),
@@ -290,7 +342,8 @@ impl TorrentManager {
         let api = Api::new(session.clone(), None);
         let history = Self::load_history(&data_dir);
         Ok(Self {
-            session, api,
+            session,
+            api,
             limits: Mutex::new(SpeedLimits::new()),
             queue: Mutex::new(QueueConfig::default()),
             forced: Mutex::new(HashSet::new()),
@@ -325,31 +378,48 @@ impl TorrentManager {
             let parsed = url::Url::parse(url).map_err(|_| format!("Invalid URL: {}", url))?;
             let host = parsed.host_str().unwrap_or("");
             // Block private/reserved IP ranges to prevent SSRF
-            if host == "localhost" || host == "127.0.0.1" || host == "::1"
-                || host.starts_with("10.") || host.starts_with("172.16.") || host.starts_with("192.168.")
-                || host == "0.0.0.0" || host.starts_with("169.254.")
+            if host == "localhost"
+                || host == "127.0.0.1"
+                || host == "::1"
+                || host.starts_with("10.")
+                || host.starts_with("172.16.")
+                || host.starts_with("192.168.")
+                || host == "0.0.0.0"
+                || host.starts_with("169.254.")
             {
-                return Err(format!("SSRF blocked: cannot connect to private IP range: {}", host));
+                return Err(format!(
+                    "SSRF blocked: cannot connect to private IP range: {}",
+                    host
+                ));
             }
             // Block raw IP addresses that aren't public
             if let Some(ip) = parsed.host().and_then(|h| match h {
                 url::Host::Ipv4(ip) => Some(ip),
                 _ => None,
             }) {
-                if ip.is_private() || ip.is_loopback() || ip.is_link_local() || ip.is_unspecified() || ip.is_multicast() {
-                    return Err(format!("SSRF blocked: cannot connect to private IP: {}", ip));
+                if ip.is_private()
+                    || ip.is_loopback()
+                    || ip.is_link_local()
+                    || ip.is_unspecified()
+                    || ip.is_multicast()
+                {
+                    return Err(format!(
+                        "SSRF blocked: cannot connect to private IP: {}",
+                        ip
+                    ));
                 }
             }
             return Ok(());
         }
-        Err(format!("Unsupported URL scheme: {}. Only magnet:, http://, https://, and ftp:// are allowed.",
-            url.split(':').next().unwrap_or("unknown")))
+        Err(format!(
+            "Unsupported URL scheme: {}. Only magnet:, http://, https://, and ftp:// are allowed.",
+            url.split(':').next().unwrap_or("unknown")
+        ))
     }
 
     pub async fn add_magnet(&self, magnet: &str) -> Result<u32> {
         // SSRF protection: validate the URL before passing to librqbit
-        Self::validate_torrent_url(magnet)
-            .map_err(|e| anyhow::anyhow!("{}", e))?;
+        Self::validate_torrent_url(magnet).map_err(|e| anyhow::anyhow!("{}", e))?;
         let id = self.add_torrent_inner(AddTorrent::from_url(magnet)).await?;
         self.enforce_queue().await;
         self.try_auto_assign(id);
@@ -358,12 +428,22 @@ impl TorrentManager {
 
     pub async fn add_torrent_file(&self, path: &str) -> Result<u32> {
         let path = PathBuf::from(path);
-        if !path.exists() { anyhow::bail!("File not found: {}", path.display()); }
-        if path.extension().map(|e| !e.eq_ignore_ascii_case("torrent")).unwrap_or(true) {
-            anyhow::bail!("Unsupported file type: '{}'. Only .torrent files are supported.", path.display());
+        if !path.exists() {
+            anyhow::bail!("File not found: {}", path.display());
+        }
+        if path
+            .extension()
+            .map(|e| !e.eq_ignore_ascii_case("torrent"))
+            .unwrap_or(true)
+        {
+            anyhow::bail!(
+                "Unsupported file type: '{}'. Only .torrent files are supported.",
+                path.display()
+            );
         }
         let path_str = path.to_str().context("Path is not valid UTF-8")?;
-        let add = AddTorrent::from_local_filename(path_str).context("Failed to read .torrent file")?;
+        let add =
+            AddTorrent::from_local_filename(path_str).context("Failed to read .torrent file")?;
         let id = self.add_torrent_inner(add).await?;
         self.enforce_queue().await;
         self.try_auto_assign(id);
@@ -371,11 +451,26 @@ impl TorrentManager {
     }
 
     async fn add_torrent_inner(&self, add: AddTorrent<'_>) -> Result<u32> {
-        let resp = self.session.add_torrent(add, Some(AddTorrentOptions { overwrite: true, ..Default::default() })).await?;
+        let resp = self
+            .session
+            .add_torrent(
+                add,
+                Some(AddTorrentOptions {
+                    overwrite: true,
+                    ..Default::default()
+                }),
+            )
+            .await?;
         let handle = resp.into_handle().context("Failed to get torrent handle")?;
-        let id: u32 = handle.id().try_into().map_err(|_| anyhow::anyhow!("Torrent ID overflow"))?;
+        let id: u32 = handle
+            .id()
+            .try_into()
+            .map_err(|_| anyhow::anyhow!("Torrent ID overflow"))?;
         // Set initial state to Metadata (for magnet) or Downloading (for .torrent file)
-        self.torrent_states.lock().unwrap().insert(id, TorrentState::Metadata);
+        self.torrent_states
+            .lock()
+            .unwrap()
+            .insert(id, TorrentState::Metadata);
         Ok(id)
     }
 
@@ -400,19 +495,27 @@ impl TorrentManager {
     pub async fn pause(&self, id: u32) -> Result<()> {
         self.forced.lock().unwrap().remove(&id);
         // Validate transition: current state → Paused
-        let current = self.get_torrent_state(id).unwrap_or(TorrentState::Downloading);
+        let current = self
+            .get_torrent_state(id)
+            .unwrap_or(TorrentState::Downloading);
         if let Err(e) = current.can_transition_to(TorrentState::Paused) {
             log::warn!("pause: {} (id={})", e, id);
         }
         self.session.pause(&self.find_handle(id)?).await?;
         // If the torrent was seeding, keep it as Seeding (librqbit remembers finished state)
         if current == TorrentState::Seeding || current == TorrentState::Downloading {
-            let list = self.api.api_torrent_list_ext(ApiTorrentListOpts { with_stats: true });
+            let list = self
+                .api
+                .api_torrent_list_ext(ApiTorrentListOpts { with_stats: true });
             let list_val: Value = serde_json::to_value(&list).unwrap_or_default();
-            let finished = list_val["torrents"].as_array().and_then(|arr| {
-                arr.iter().find(|t| t["id"].as_u64() == Some(id as u64))
-                    .and_then(|t| t["stats"]["finished"].as_bool())
-            }).unwrap_or(false);
+            let finished = list_val["torrents"]
+                .as_array()
+                .and_then(|arr| {
+                    arr.iter()
+                        .find(|t| t["id"].as_u64() == Some(id as u64))
+                        .and_then(|t| t["stats"]["finished"].as_bool())
+                })
+                .unwrap_or(false);
             if finished {
                 self.set_torrent_state(id, TorrentState::Seeding).ok();
             } else {
@@ -426,13 +529,23 @@ impl TorrentManager {
         self.forced.lock().unwrap().remove(&id);
         // Validate transition: current state → Downloading or Seeding
         let current = self.get_torrent_state(id).unwrap_or(TorrentState::Paused);
-        let list = self.api.api_torrent_list_ext(ApiTorrentListOpts { with_stats: true });
+        let list = self
+            .api
+            .api_torrent_list_ext(ApiTorrentListOpts { with_stats: true });
         let list_val: Value = serde_json::to_value(&list).unwrap_or_default();
-        let finished = list_val["torrents"].as_array().and_then(|arr| {
-            arr.iter().find(|t| t["id"].as_u64() == Some(id as u64))
-                .and_then(|t| t["stats"]["finished"].as_bool())
-        }).unwrap_or(false);
-        let target = if finished { TorrentState::Seeding } else { TorrentState::Downloading };
+        let finished = list_val["torrents"]
+            .as_array()
+            .and_then(|arr| {
+                arr.iter()
+                    .find(|t| t["id"].as_u64() == Some(id as u64))
+                    .and_then(|t| t["stats"]["finished"].as_bool())
+            })
+            .unwrap_or(false);
+        let target = if finished {
+            TorrentState::Seeding
+        } else {
+            TorrentState::Downloading
+        };
         if let Err(e) = current.can_transition_to(target) {
             log::warn!("resume: {} (id={})", e, id);
         }
@@ -444,13 +557,23 @@ impl TorrentManager {
 
     pub async fn force_resume(&self, id: u32) -> Result<()> {
         self.forced.lock().unwrap().insert(id);
-        let list = self.api.api_torrent_list_ext(ApiTorrentListOpts { with_stats: true });
+        let list = self
+            .api
+            .api_torrent_list_ext(ApiTorrentListOpts { with_stats: true });
         let list_val: Value = serde_json::to_value(&list).unwrap_or_default();
-        let finished = list_val["torrents"].as_array().and_then(|arr| {
-            arr.iter().find(|t| t["id"].as_u64() == Some(id as u64))
-                .and_then(|t| t["stats"]["finished"].as_bool())
-        }).unwrap_or(false);
-        let target = if finished { TorrentState::Seeding } else { TorrentState::Downloading };
+        let finished = list_val["torrents"]
+            .as_array()
+            .and_then(|arr| {
+                arr.iter()
+                    .find(|t| t["id"].as_u64() == Some(id as u64))
+                    .and_then(|t| t["stats"]["finished"].as_bool())
+            })
+            .unwrap_or(false);
+        let target = if finished {
+            TorrentState::Seeding
+        } else {
+            TorrentState::Downloading
+        };
         self.set_torrent_state(id, target).ok();
         self.session.unpause(&self.find_handle(id)?).await?;
         Ok(())
@@ -464,10 +587,17 @@ impl TorrentManager {
 
     /// Pause all active torrents.
     pub async fn pause_all(&self) -> Result<()> {
-        let list = self.api.api_torrent_list_ext(ApiTorrentListOpts { with_stats: true });
+        let list = self
+            .api
+            .api_torrent_list_ext(ApiTorrentListOpts { with_stats: true });
         let list_val: Value = serde_json::to_value(&list).unwrap_or_default();
-        let ids: Vec<u32> = list_val["torrents"].as_array()
-            .map(|arr| arr.iter().filter_map(|t| t["id"].as_u64().map(|id| id as u32)).collect())
+        let ids: Vec<u32> = list_val["torrents"]
+            .as_array()
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|t| t["id"].as_u64().map(|id| id as u32))
+                    .collect()
+            })
             .unwrap_or_default();
         for id in ids {
             if let Some(handle) = self.session.get(TorrentIdOrHash::Id(id as usize)) {
@@ -479,13 +609,24 @@ impl TorrentManager {
 
     /// Resume all paused torrents.
     pub async fn resume_all(&self) -> Result<()> {
-        let list = self.api.api_torrent_list_ext(ApiTorrentListOpts { with_stats: true });
+        let list = self
+            .api
+            .api_torrent_list_ext(ApiTorrentListOpts { with_stats: true });
         let list_val: Value = serde_json::to_value(&list).unwrap_or_default();
-        let ids: Vec<u32> = list_val["torrents"].as_array()
-            .map(|arr| arr.iter().filter_map(|t| {
-                let paused = t["stats"]["state"].as_str() == Some("paused");
-                if paused { t["id"].as_u64().map(|id| id as u32) } else { None }
-            }).collect())
+        let ids: Vec<u32> = list_val["torrents"]
+            .as_array()
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|t| {
+                        let paused = t["stats"]["state"].as_str() == Some("paused");
+                        if paused {
+                            t["id"].as_u64().map(|id| id as u32)
+                        } else {
+                            None
+                        }
+                    })
+                    .collect()
+            })
             .unwrap_or_default();
         for id in ids {
             if let Some(handle) = self.session.get(TorrentIdOrHash::Id(id as usize)) {
@@ -497,29 +638,41 @@ impl TorrentManager {
 
     pub async fn delete(&self, id: u32, delete_files: bool) -> Result<()> {
         // Record deletion in history before removing
-        let list = self.api.api_torrent_list_ext(ApiTorrentListOpts { with_stats: true });
+        let list = self
+            .api
+            .api_torrent_list_ext(ApiTorrentListOpts { with_stats: true });
         let list_val: Value = serde_json::to_value(&list).unwrap_or_default();
-        if let Some(t) = list_val["torrents"].as_array().and_then(|arr| arr.iter().find(|t| t["id"].as_u64() == Some(id as u64))) {
+        if let Some(t) = list_val["torrents"]
+            .as_array()
+            .and_then(|arr| arr.iter().find(|t| t["id"].as_u64() == Some(id as u64)))
+        {
             let name = t["name"].as_str().unwrap_or("Unknown").to_string();
             let info_hash = t["info_hash"].as_str().unwrap_or("").to_string();
             let total_bytes = t["stats"]["total_bytes"].as_u64().unwrap_or(0);
             let uploaded_bytes = t["stats"]["uploaded_bytes"].as_u64().unwrap_or(0);
             let cat = self.get_torrent_category(id).and_then(|cid| {
                 let cfg = self.config.lock().unwrap();
-                cfg.categories.iter().find(|c| c.id == cid).map(|c| c.name.clone())
+                cfg.categories
+                    .iter()
+                    .find(|c| c.id == cid)
+                    .map(|c| c.name.clone())
             });
             self.record_deleted(&name, &info_hash, total_bytes, uploaded_bytes, cat);
         }
 
         self.forced.lock().unwrap().remove(&id);
         self.torrent_states.lock().unwrap().remove(&id);
-        self.session.delete(TorrentIdOrHash::Id(id as usize), delete_files).await?;
+        self.session
+            .delete(TorrentIdOrHash::Id(id as usize), delete_files)
+            .await?;
         self.enforce_queue().await;
         Ok(())
     }
 
     pub fn get_torrent_details(&self, id: u32) -> Result<TorrentDetailsResponse> {
-        self.api.api_torrent_details(TorrentIdOrHash::Id(id as usize)).map_err(|e| anyhow::anyhow!("{}", e))
+        self.api
+            .api_torrent_details(TorrentIdOrHash::Id(id as usize))
+            .map_err(|e| anyhow::anyhow!("{}", e))
     }
 
     /// Get peer connections for a specific torrent.
@@ -531,11 +684,15 @@ impl TorrentManager {
 
     /// Get tracker information for a specific torrent from the torrent details.
     pub fn get_torrent_trackers(&self, id: u32) -> Result<Value> {
-        let details = self.api.api_torrent_details(TorrentIdOrHash::Id(id as usize))?;
+        let details = self
+            .api
+            .api_torrent_details(TorrentIdOrHash::Id(id as usize))?;
         // Serialize to Value and extract tracker-related fields
         let val = serde_json::to_value(&details)?;
         // Try to get trackers array, or return whatever is available
-        let trackers = val.get("trackers").cloned()
+        let trackers = val
+            .get("trackers")
+            .cloned()
             .or_else(|| val.get("tracker_urls").cloned())
             .or_else(|| val.get("announce_list").cloned())
             .or_else(|| val.get("announce").map(|a| serde_json::json!([a])))
@@ -545,15 +702,22 @@ impl TorrentManager {
 
     pub async fn update_only_files(&self, id: u32, only_files: Vec<usize>) -> Result<()> {
         let set: HashSet<usize> = only_files.into_iter().collect();
-        self.session.update_only_files(&self.find_handle(id)?, &set).await.context("Failed to update file selection")?;
+        self.session
+            .update_only_files(&self.find_handle(id)?, &set)
+            .await
+            .context("Failed to update file selection")?;
         Ok(())
     }
 
     // ── Queue management ──────────────────────────────────────────
 
-    pub fn forced_snapshot(&self) -> HashSet<u32> { self.forced.lock().unwrap().clone() }
+    pub fn forced_snapshot(&self) -> HashSet<u32> {
+        self.forced.lock().unwrap().clone()
+    }
 
-    pub fn sequential_snapshot(&self) -> HashSet<u32> { self.sequential.lock().unwrap().clone() }
+    pub fn sequential_snapshot(&self) -> HashSet<u32> {
+        self.sequential.lock().unwrap().clone()
+    }
 
     // ── Sequential download ───────────────────────────────────────
 
@@ -584,7 +748,9 @@ impl TorrentManager {
     }
 
     pub async fn enforce_queue(&self) {
-        let list = self.api.api_torrent_list_ext(ApiTorrentListOpts { with_stats: true });
+        let list = self
+            .api
+            .api_torrent_list_ext(ApiTorrentListOpts { with_stats: true });
         let list_val: Value = serde_json::to_value(&list).unwrap_or_default();
         let raw_torrents: Vec<Value> = list_val["torrents"].as_array().cloned().unwrap_or_default();
         let config = self.queue.lock().unwrap().clone();
@@ -594,33 +760,46 @@ impl TorrentManager {
         let mut seed_ids: Vec<u32> = Vec::new();
         for t in &raw_torrents {
             let id = t["id"].as_u64().unwrap_or(0) as u32;
-            if forced.contains(&id) { continue; }
+            if forced.contains(&id) {
+                continue;
+            }
             let stats = t.get("stats");
             let raw_state = stats.and_then(|s| s["state"].as_str()).unwrap_or("unknown");
             let finished = stats.and_then(|s| s["finished"].as_bool()).unwrap_or(false);
-            match (raw_state, finished) { ("live", false) => dl_ids.push(id), ("live", true) => seed_ids.push(id), _ => {} }
+            match (raw_state, finished) {
+                ("live", false) => dl_ids.push(id),
+                ("live", true) => seed_ids.push(id),
+                _ => {}
+            }
         }
 
         let max_dl = config.max_active_downloads as usize;
         if dl_ids.len() > max_dl {
             for id in dl_ids.iter().skip(max_dl) {
-                if let Some(handle) = self.session.get(TorrentIdOrHash::Id(*id as usize)) { let _ = self.session.pause(&handle).await; }
+                if let Some(handle) = self.session.get(TorrentIdOrHash::Id(*id as usize)) {
+                    let _ = self.session.pause(&handle).await;
+                }
             }
         }
         let max_seed = config.max_active_seeds as usize;
         if seed_ids.len() > max_seed {
             for id in seed_ids.iter().skip(max_seed) {
-                if let Some(handle) = self.session.get(TorrentIdOrHash::Id(*id as usize)) { let _ = self.session.pause(&handle).await; }
+                if let Some(handle) = self.session.get(TorrentIdOrHash::Id(*id as usize)) {
+                    let _ = self.session.pause(&handle).await;
+                }
             }
         }
     }
 
     pub fn set_queue_config(&self, max_dl: u32, max_seed: u32) {
         let mut q = self.queue.lock().unwrap();
-        q.max_active_downloads = max_dl; q.max_active_seeds = max_seed;
+        q.max_active_downloads = max_dl;
+        q.max_active_seeds = max_seed;
     }
 
-    pub fn get_queue_config(&self) -> QueueConfig { self.queue.lock().unwrap().clone() }
+    pub fn get_queue_config(&self) -> QueueConfig {
+        self.queue.lock().unwrap().clone()
+    }
 
     // ── Speed limits ──────────────────────────────────────────────
 
@@ -631,101 +810,198 @@ impl TorrentManager {
         } else if limits.schedule_active && limits.schedule_enabled {
             let now = Local::now();
             let wd = now.format("%u").to_string().parse::<u8>().unwrap_or(0);
-            let h = now.hour() as u8; let m = now.minute() as u8;
+            let h = now.hour() as u8;
+            let m = now.minute() as u8;
             let active = limits.schedule_rules.iter().find(|r| r.matches(wd, h, m));
             match active {
                 Some(r) => (r.download_limit, r.upload_limit),
-                None => { limits.schedule_active = false; limits.normal_download = limits.saved_normal_download; limits.normal_upload = limits.saved_normal_upload; (limits.normal_download, limits.normal_upload) }
+                None => {
+                    limits.schedule_active = false;
+                    limits.normal_download = limits.saved_normal_download;
+                    limits.normal_upload = limits.saved_normal_upload;
+                    (limits.normal_download, limits.normal_upload)
+                }
             }
-        } else { (limits.normal_download, limits.normal_upload) };
+        } else {
+            (limits.normal_download, limits.normal_upload)
+        };
         drop(limits);
-        self.session.ratelimits.set_download_bps(dl.map(NonZeroU32::new).flatten());
-        self.session.ratelimits.set_upload_bps(ul.map(NonZeroU32::new).flatten());
+        self.session
+            .ratelimits
+            .set_download_bps(dl.and_then(NonZeroU32::new));
+        self.session
+            .ratelimits
+            .set_upload_bps(ul.and_then(NonZeroU32::new));
     }
 
-    pub fn set_normal_download_limit(&self, bps: Option<u32>) { let mut l = self.limits.lock().unwrap(); l.normal_download = bps; l.saved_normal_download = bps; drop(l); self.apply_limits(); }
-    pub fn set_normal_upload_limit(&self, bps: Option<u32>) { let mut l = self.limits.lock().unwrap(); l.normal_upload = bps; l.saved_normal_upload = bps; drop(l); self.apply_limits(); }
-    pub fn set_turtle_download_limit(&self, bps: Option<u32>) { self.limits.lock().unwrap().turtle_download = bps; self.apply_limits(); }
-    pub fn set_turtle_upload_limit(&self, bps: Option<u32>) { self.limits.lock().unwrap().turtle_upload = bps; self.apply_limits(); }
-    pub fn set_turtle_mode(&self, enabled: bool) { self.limits.lock().unwrap().turtle_mode = enabled; self.apply_limits(); }
+    pub fn set_normal_download_limit(&self, bps: Option<u32>) {
+        let mut l = self.limits.lock().unwrap();
+        l.normal_download = bps;
+        l.saved_normal_download = bps;
+        drop(l);
+        self.apply_limits();
+    }
+    pub fn set_normal_upload_limit(&self, bps: Option<u32>) {
+        let mut l = self.limits.lock().unwrap();
+        l.normal_upload = bps;
+        l.saved_normal_upload = bps;
+        drop(l);
+        self.apply_limits();
+    }
+    pub fn set_turtle_download_limit(&self, bps: Option<u32>) {
+        self.limits.lock().unwrap().turtle_download = bps;
+        self.apply_limits();
+    }
+    pub fn set_turtle_upload_limit(&self, bps: Option<u32>) {
+        self.limits.lock().unwrap().turtle_upload = bps;
+        self.apply_limits();
+    }
+    pub fn set_turtle_mode(&self, enabled: bool) {
+        self.limits.lock().unwrap().turtle_mode = enabled;
+        self.apply_limits();
+    }
 
     pub fn check_schedule(&self) {
         let mut limits = self.limits.lock().unwrap();
         if !limits.schedule_enabled || limits.schedule_rules.is_empty() {
-            if limits.schedule_active { limits.schedule_active = false; limits.normal_download = limits.saved_normal_download; limits.normal_upload = limits.saved_normal_upload; }
-            drop(limits); self.apply_limits(); return;
+            if limits.schedule_active {
+                limits.schedule_active = false;
+                limits.normal_download = limits.saved_normal_download;
+                limits.normal_upload = limits.saved_normal_upload;
+            }
+            drop(limits);
+            self.apply_limits();
+            return;
         }
         let now = Local::now();
         let wd = now.format("%u").to_string().parse::<u8>().unwrap_or(0);
-        let h = now.hour() as u8; let m = now.minute() as u8;
+        let h = now.hour() as u8;
+        let m = now.minute() as u8;
         let active = limits.schedule_rules.iter().find(|r| r.matches(wd, h, m));
-        if active.is_some() && !limits.schedule_active { limits.saved_normal_download = limits.normal_download; limits.saved_normal_upload = limits.normal_upload; limits.schedule_active = true; }
-        else if active.is_none() && limits.schedule_active { limits.schedule_active = false; limits.normal_download = limits.saved_normal_download; limits.normal_upload = limits.saved_normal_upload; }
-        drop(limits); self.apply_limits();
+        if active.is_some() && !limits.schedule_active {
+            limits.saved_normal_download = limits.normal_download;
+            limits.saved_normal_upload = limits.normal_upload;
+            limits.schedule_active = true;
+        } else if active.is_none() && limits.schedule_active {
+            limits.schedule_active = false;
+            limits.normal_download = limits.saved_normal_download;
+            limits.normal_upload = limits.saved_normal_upload;
+        }
+        drop(limits);
+        self.apply_limits();
     }
 
     pub fn set_schedule_rules(&self, rules: Vec<ScheduleRule>, enabled: bool) {
         let mut limits = self.limits.lock().unwrap();
-        limits.schedule_rules = rules; limits.schedule_enabled = enabled;
-        drop(limits); self.check_schedule();
+        limits.schedule_rules = rules;
+        limits.schedule_enabled = enabled;
+        drop(limits);
+        self.check_schedule();
     }
 
     pub fn get_schedule_rules(&self) -> (Vec<ScheduleRule>, bool, bool) {
         let limits = self.limits.lock().unwrap();
-        (limits.schedule_rules.clone(), limits.schedule_enabled, limits.schedule_active)
+        (
+            limits.schedule_rules.clone(),
+            limits.schedule_enabled,
+            limits.schedule_active,
+        )
     }
 
     // ── RSS management ────────────────────────────────────────────
 
     pub fn add_rss_feed(&self, name: String, url: String) -> RssFeed {
         let mut rss = self.rss.lock().unwrap();
-        let feed = RssFeed { id: rss.next_feed_id, name, url, interval_secs: 1800, filters: vec![] };
-        rss.next_feed_id += 1; rss.feeds.push(feed.clone()); feed
+        let feed = RssFeed {
+            id: rss.next_feed_id,
+            name,
+            url,
+            interval_secs: 1800,
+            filters: vec![],
+        };
+        rss.next_feed_id += 1;
+        rss.feeds.push(feed.clone());
+        feed
     }
 
-    pub fn remove_rss_feed(&self, id: u32) { self.rss.lock().unwrap().feeds.retain(|f| f.id != id); }
-    pub fn get_rss_feeds(&self) -> Vec<RssFeed> { self.rss.lock().unwrap().feeds.clone() }
+    pub fn remove_rss_feed(&self, id: u32) {
+        self.rss.lock().unwrap().feeds.retain(|f| f.id != id);
+    }
+    pub fn get_rss_feeds(&self) -> Vec<RssFeed> {
+        self.rss.lock().unwrap().feeds.clone()
+    }
 
     pub fn update_rss_feed(&self, id: u32, name: String, url: String, interval_secs: u64) {
         let mut rss = self.rss.lock().unwrap();
         if let Some(feed) = rss.feeds.iter_mut().find(|f| f.id == id) {
-            feed.name = name; feed.url = url; feed.interval_secs = interval_secs;
+            feed.name = name;
+            feed.url = url;
+            feed.interval_secs = interval_secs;
         }
     }
 
-    pub fn add_rss_filter(&self, feed_id: u32, name_regex: String, min_size: Option<u64>, max_size: Option<u64>, add_torrent: bool) -> Option<RssFilter> {
+    pub fn add_rss_filter(
+        &self,
+        feed_id: u32,
+        name_regex: String,
+        min_size: Option<u64>,
+        max_size: Option<u64>,
+        add_torrent: bool,
+    ) -> Option<RssFilter> {
         let mut rss = self.rss.lock().unwrap();
-        let fid = rss.next_filter_id; rss.next_filter_id += 1;
-        let filter = RssFilter { id: fid, name_regex, min_size, max_size, add_torrent };
-        rss.feeds.iter_mut().find(|f| f.id == feed_id)?.filters.push(filter.clone());
+        let fid = rss.next_filter_id;
+        rss.next_filter_id += 1;
+        let filter = RssFilter {
+            id: fid,
+            name_regex,
+            min_size,
+            max_size,
+            add_torrent,
+        };
+        rss.feeds
+            .iter_mut()
+            .find(|f| f.id == feed_id)?
+            .filters
+            .push(filter.clone());
         Some(filter)
     }
 
     pub fn remove_rss_filter(&self, feed_id: u32, filter_id: u32) {
         let mut rss = self.rss.lock().unwrap();
-        if let Some(feed) = rss.feeds.iter_mut().find(|f| f.id == feed_id) { feed.filters.retain(|f| f.id != filter_id); }
+        if let Some(feed) = rss.feeds.iter_mut().find(|f| f.id == feed_id) {
+            feed.filters.retain(|f| f.id != filter_id);
+        }
     }
 
     pub async fn poll_rss_feeds(&self) -> Vec<(u32, Vec<RssItem>)> {
-        let (feeds, seen_links) = { let r = self.rss.lock().unwrap(); (r.feeds.clone(), r.seen_links.clone()) };
+        let (feeds, seen_links) = {
+            let r = self.rss.lock().unwrap();
+            (r.feeds.clone(), r.seen_links.clone())
+        };
         let mut results = Vec::new();
         let mut new_seen = HashSet::new();
 
         for feed in &feeds {
             let items = match self.fetch_rss_feed(&feed.url).await {
                 Ok(items) => items,
-                Err(e) => { log::warn!("RSS fetch failed for '{}': {}", feed.name, e); continue; }
+                Err(e) => {
+                    log::warn!("RSS fetch failed for '{}': {}", feed.name, e);
+                    continue;
+                }
             };
 
             let mut new_items = Vec::new();
             for item in &items {
                 if !seen_links.contains(&item.link) && !new_seen.contains(&item.link) {
-                    new_seen.insert(item.link.clone()); new_items.push(item.clone());
+                    new_seen.insert(item.link.clone());
+                    new_items.push(item.clone());
                 }
             }
 
             if !new_items.is_empty() {
-                for item in &new_items { self.check_rss_filters(feed, item).await; }
+                for item in &new_items {
+                    self.check_rss_filters(feed, item).await;
+                }
                 results.push((feed.id, new_items));
             }
         }
@@ -735,7 +1011,12 @@ impl TorrentManager {
             rss.seen_links.extend(new_seen);
             // Cap seen_links at 10,000 entries to prevent memory leak
             if rss.seen_links.len() > 10_000 {
-                let to_keep: HashSet<String> = rss.seen_links.iter().skip(rss.seen_links.len() - 10_000).cloned().collect();
+                let to_keep: HashSet<String> = rss
+                    .seen_links
+                    .iter()
+                    .skip(rss.seen_links.len() - 10_000)
+                    .cloned()
+                    .collect();
                 rss.seen_links = to_keep;
             }
         }
@@ -748,33 +1029,45 @@ impl TorrentManager {
         let bytes = resp.bytes().await?;
         let channel = rss::Channel::read_from(&bytes[..])?;
 
-        let items = channel.items().iter().filter_map(|item| {
-            let title = item.title()?.to_string();
-            let link = item.link()?.to_string();
+        let items = channel
+            .items()
+            .iter()
+            .filter_map(|item| {
+                let title = item.title()?.to_string();
+                let link = item.link()?.to_string();
 
-            // Try enclosures first (standard RSS way), then content text, then description regex
-            let size = item.enclosure()
-                .map(|e| e.length())
-                .and_then(|l| l.parse::<u64>().ok())
-                .or_else(|| item.content().and_then(|c| c.parse::<u64>().ok()))
-                .or_else(|| {
-                    item.description().and_then(|desc| {
-                        let re = regex::Regex::new(r"(?i)(\d+(?:\.\d+)?)\s*(KB|MB|GB|TB)").ok()?;
-                        let caps = re.captures(desc)?;
-                        let val: f64 = caps.get(1)?.as_str().parse().ok()?;
-                        let multiplier = match caps.get(2)?.as_str().to_uppercase().as_str() {
-                            "KB" => 1024.0, "MB" => 1024.0 * 1024.0,
-                            "GB" => 1024.0 * 1024.0 * 1024.0,
-                            "TB" => 1024.0 * 1024.0 * 1024.0 * 1024.0,
-                            _ => return None,
-                        };
-                        Some((val * multiplier) as u64)
-                    })
-                });
+                // Try enclosures first (standard RSS way), then content text, then description regex
+                let size = item
+                    .enclosure()
+                    .map(|e| e.length())
+                    .and_then(|l| l.parse::<u64>().ok())
+                    .or_else(|| item.content().and_then(|c| c.parse::<u64>().ok()))
+                    .or_else(|| {
+                        item.description().and_then(|desc| {
+                            let re =
+                                regex::Regex::new(r"(?i)(\d+(?:\.\d+)?)\s*(KB|MB|GB|TB)").ok()?;
+                            let caps = re.captures(desc)?;
+                            let val: f64 = caps.get(1)?.as_str().parse().ok()?;
+                            let multiplier = match caps.get(2)?.as_str().to_uppercase().as_str() {
+                                "KB" => 1024.0,
+                                "MB" => 1024.0 * 1024.0,
+                                "GB" => 1024.0 * 1024.0 * 1024.0,
+                                "TB" => 1024.0 * 1024.0 * 1024.0 * 1024.0,
+                                _ => return None,
+                            };
+                            Some((val * multiplier) as u64)
+                        })
+                    });
 
-            let pub_date = item.pub_date().map(|s| s.to_string());
-            Some(RssItem { title, link, size, pub_date })
-        }).collect();
+                let pub_date = item.pub_date().map(|s| s.to_string());
+                Some(RssItem {
+                    title,
+                    link,
+                    size,
+                    pub_date,
+                })
+            })
+            .collect();
 
         Ok(items)
     }
@@ -782,11 +1075,24 @@ impl TorrentManager {
     async fn check_rss_filters(&self, feed: &RssFeed, item: &RssItem) {
         for filter in &feed.filters {
             if !filter.name_regex.is_empty() {
-                let re = match regex::Regex::new(&filter.name_regex) { Ok(r) => r, Err(_) => continue, };
-                if !re.is_match(&item.title) { continue; }
+                let re = match regex::Regex::new(&filter.name_regex) {
+                    Ok(r) => r,
+                    Err(_) => continue,
+                };
+                if !re.is_match(&item.title) {
+                    continue;
+                }
             }
-            if let Some(min) = filter.min_size { if item.size.map_or(true, |s| s < min) { continue; } }
-            if let Some(max) = filter.max_size { if item.size.map_or(false, |s| s > max) { continue; } }
+            if let Some(min) = filter.min_size {
+                if item.size.is_none_or(|s| s < min) {
+                    continue;
+                }
+            }
+            if let Some(max) = filter.max_size {
+                if item.size.is_some_and(|s| s > max) {
+                    continue;
+                }
+            }
             if filter.add_torrent {
                 // Use add_magnet for all links — librqbit's from_url handles magnets AND HTTP .torrent URLs
                 let _ = self.add_magnet(&item.link).await;
@@ -808,9 +1114,21 @@ impl TorrentManager {
         self.config.lock().unwrap().categories.clone()
     }
 
-    pub fn add_category(&self, name: String, icon: String, save_path: Option<String>, auto_rule: Option<String>) -> crate::config::Category {
+    pub fn add_category(
+        &self,
+        name: String,
+        icon: String,
+        save_path: Option<String>,
+        auto_rule: Option<String>,
+    ) -> crate::config::Category {
         let mut cfg = self.config.lock().unwrap();
-        let cat = crate::config::Category { id: cfg.next_category_id, name, icon, save_path, auto_rule };
+        let cat = crate::config::Category {
+            id: cfg.next_category_id,
+            name,
+            icon,
+            save_path,
+            auto_rule,
+        };
         cfg.next_category_id += 1;
         cfg.categories.push(cat.clone());
         drop(cfg);
@@ -819,14 +1137,28 @@ impl TorrentManager {
     }
 
     pub fn remove_category(&self, id: u32) {
-        self.config.lock().unwrap().categories.retain(|c| c.id != id);
+        self.config
+            .lock()
+            .unwrap()
+            .categories
+            .retain(|c| c.id != id);
         self.save_config();
     }
 
-    pub fn update_category(&self, id: u32, name: String, icon: String, save_path: Option<String>, auto_rule: Option<String>) {
+    pub fn update_category(
+        &self,
+        id: u32,
+        name: String,
+        icon: String,
+        save_path: Option<String>,
+        auto_rule: Option<String>,
+    ) {
         let mut cfg = self.config.lock().unwrap();
         if let Some(cat) = cfg.categories.iter_mut().find(|c| c.id == id) {
-            cat.name = name; cat.icon = icon; cat.save_path = save_path; cat.auto_rule = auto_rule;
+            cat.name = name;
+            cat.icon = icon;
+            cat.save_path = save_path;
+            cat.auto_rule = auto_rule;
         }
         drop(cfg);
         self.save_config();
@@ -836,9 +1168,19 @@ impl TorrentManager {
         self.config.lock().unwrap().tags.clone()
     }
 
-    pub fn add_tag(&self, name: String, color: String, auto_rule: Option<String>) -> crate::config::Tag {
+    pub fn add_tag(
+        &self,
+        name: String,
+        color: String,
+        auto_rule: Option<String>,
+    ) -> crate::config::Tag {
         let mut cfg = self.config.lock().unwrap();
-        let tag = crate::config::Tag { id: cfg.next_tag_id, name, color, auto_rule };
+        let tag = crate::config::Tag {
+            id: cfg.next_tag_id,
+            name,
+            color,
+            auto_rule,
+        };
         cfg.next_tag_id += 1;
         cfg.tags.push(tag.clone());
         drop(cfg);
@@ -901,7 +1243,8 @@ impl TorrentManager {
             .map_err(|e| format!("Failed to create test client: {}", e))?;
 
         // Try to reach a reliable external service
-        let resp = client.get("https://httpbin.org/ip")
+        let resp = client
+            .get("https://httpbin.org/ip")
             .send()
             .await
             .map_err(|e| format!("Connection failed: {}", e))?;
@@ -930,7 +1273,12 @@ impl TorrentManager {
     }
 
     pub fn get_torrent_category(&self, torrent_id: u32) -> Option<u32> {
-        self.config.lock().unwrap().torrent_categories.get(&torrent_id).copied()
+        self.config
+            .lock()
+            .unwrap()
+            .torrent_categories
+            .get(&torrent_id)
+            .copied()
     }
 
     pub fn set_torrent_tags(&self, torrent_id: u32, tag_ids: Vec<u32>) {
@@ -941,15 +1289,24 @@ impl TorrentManager {
     }
 
     pub fn get_torrent_tags(&self, torrent_id: u32) -> Vec<u32> {
-        self.config.lock().unwrap().torrent_tags.get(&torrent_id).cloned().unwrap_or_default()
+        self.config
+            .lock()
+            .unwrap()
+            .torrent_tags
+            .get(&torrent_id)
+            .cloned()
+            .unwrap_or_default()
     }
 
     /// Try to read the torrent name from the API and auto-assign.
     fn try_auto_assign(&self, id: u32) {
-        let list = self.api.api_torrent_list_ext(ApiTorrentListOpts { with_stats: true });
+        let list = self
+            .api
+            .api_torrent_list_ext(ApiTorrentListOpts { with_stats: true });
         let list_val: Value = serde_json::to_value(&list).unwrap_or_default();
         let name = list_val["torrents"].as_array().and_then(|arr| {
-            arr.iter().find(|t| t["id"].as_u64() == Some(id as u64))
+            arr.iter()
+                .find(|t| t["id"].as_u64() == Some(id as u64))
                 .and_then(|t| t["name"].as_str().map(String::from))
         });
         if let Some(ref n) = name {
@@ -985,12 +1342,19 @@ impl TorrentManager {
     /// Check all seeding torrents and apply auto-management rules.
     pub async fn auto_manage(&self) {
         let am = self.config.lock().unwrap().auto_management.clone();
-        if !am.enabled { return; }
+        if !am.enabled {
+            return;
+        }
 
-        let list = self.api.api_torrent_list_ext(ApiTorrentListOpts { with_stats: true });
+        let list = self
+            .api
+            .api_torrent_list_ext(ApiTorrentListOpts { with_stats: true });
         let list_val: Value = serde_json::to_value(&list).unwrap_or_default();
         let raw_torrents: Vec<Value> = list_val["torrents"].as_array().cloned().unwrap_or_default();
-        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
 
         // Track seed start times: when a torrent first appears as "finished", record the time
         {
@@ -1007,23 +1371,44 @@ impl TorrentManager {
 
         for t in &raw_torrents {
             let id = t["id"].as_u64().unwrap_or(0) as u32;
-            if self.forced.lock().unwrap().contains(&id) { continue; }
+            if self.forced.lock().unwrap().contains(&id) {
+                continue;
+            }
             let stats = t.get("stats");
             let finished = stats.and_then(|s| s["finished"].as_bool()).unwrap_or(false);
-            if !finished { continue; }
+            if !finished {
+                continue;
+            }
 
             let total = stats.and_then(|s| s["total_bytes"].as_u64()).unwrap_or(0);
-            let uploaded = stats.and_then(|s| s["uploaded_bytes"].as_u64()).unwrap_or(0);
-            let ratio = if total > 0 { uploaded as f64 / total as f64 } else { 0.0 };
+            let uploaded = stats
+                .and_then(|s| s["uploaded_bytes"].as_u64())
+                .unwrap_or(0);
+            let ratio = if total > 0 {
+                uploaded as f64 / total as f64
+            } else {
+                0.0
+            };
 
             // Check ratio limit
-            if am.ratio_limit > 0.0 && ratio < am.ratio_limit { continue; }
+            if am.ratio_limit > 0.0 && ratio < am.ratio_limit {
+                continue;
+            }
 
             // Check seed time limit
             if am.seed_time_limit_minutes > 0 {
                 let seed_time_secs = am.seed_time_limit_minutes as u64 * 60;
-                let elapsed = self.seed_start_times.lock().unwrap().get(&id).copied().map(|start| now.saturating_sub(start)).unwrap_or(0);
-                if elapsed < seed_time_secs { continue; }
+                let elapsed = self
+                    .seed_start_times
+                    .lock()
+                    .unwrap()
+                    .get(&id)
+                    .copied()
+                    .map(|start| now.saturating_sub(start))
+                    .unwrap_or(0);
+                if elapsed < seed_time_secs {
+                    continue;
+                }
             }
 
             // Apply actions
@@ -1039,10 +1424,18 @@ impl TorrentManager {
                     let name = t["name"].as_str().unwrap_or("unknown");
                     let current_path = {
                         let cfg = self.config.lock().unwrap();
-                        PathBuf::from(cfg.effective_path(None).unwrap_or_else(|| self.data_dir.to_string_lossy().to_string()))
+                        PathBuf::from(
+                            cfg.effective_path(None)
+                                .unwrap_or_else(|| self.data_dir.to_string_lossy().to_string()),
+                        )
                     };
                     let dest_path = PathBuf::from(&dest).join(name);
-                    if current_path != dest_path.parent().map(|p| p.to_path_buf()).unwrap_or_default() {
+                    if current_path
+                        != dest_path
+                            .parent()
+                            .map(|p| p.to_path_buf())
+                            .unwrap_or_default()
+                    {
                         // Attempt to move files using filesystem operations
                         let src = current_path.join(name);
                         if src.exists() {
@@ -1050,7 +1443,8 @@ impl TorrentManager {
                             if let Ok(entries) = std::fs::read_dir(&src) {
                                 for entry in entries.flatten() {
                                     let file_name = entry.file_name();
-                                    let _ = std::fs::rename(entry.path(), dest_path.join(&file_name));
+                                    let _ =
+                                        std::fs::rename(entry.path(), dest_path.join(&file_name));
                                 }
                             }
                             // Delete the now-empty source directory
@@ -1082,12 +1476,10 @@ impl TorrentManager {
         let path = data_dir.join("history.json");
         if path.exists() {
             match std::fs::read_to_string(&path) {
-                Ok(content) => {
-                    match serde_json::from_str(&content) {
-                        Ok(h) => return h,
-                        Err(e) => log::warn!("Failed to parse history.json: {}", e),
-                    }
-                }
+                Ok(content) => match serde_json::from_str(&content) {
+                    Ok(h) => return h,
+                    Err(e) => log::warn!("Failed to parse history.json: {}", e),
+                },
                 Err(e) => log::warn!("Failed to read history.json: {}", e),
             }
         }
@@ -1103,14 +1495,25 @@ impl TorrentManager {
     }
 
     /// Record a completed download in history.
-    pub fn record_completed(&self, name: &str, info_hash: &str, total_bytes: u64, uploaded_bytes: u64, category_name: Option<String>, completed_at: u64) {
+    pub fn record_completed(
+        &self,
+        name: &str,
+        info_hash: &str,
+        total_bytes: u64,
+        uploaded_bytes: u64,
+        category_name: Option<String>,
+        completed_at: u64,
+    ) {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())
             .unwrap_or(0);
         let mut history = self.history.lock().unwrap();
         // Don't record duplicates (same info_hash + completed event)
-        if history.iter().any(|e| e.info_hash == info_hash && e.event == "completed") {
+        if history
+            .iter()
+            .any(|e| e.info_hash == info_hash && e.event == "completed")
+        {
             return;
         }
         history.push(TorrentHistoryEntry {
@@ -1133,7 +1536,14 @@ impl TorrentManager {
     }
 
     /// Record a deleted torrent in history.
-    pub fn record_deleted(&self, name: &str, info_hash: &str, total_bytes: u64, uploaded_bytes: u64, category_name: Option<String>) {
+    pub fn record_deleted(
+        &self,
+        name: &str,
+        info_hash: &str,
+        total_bytes: u64,
+        uploaded_bytes: u64,
+        category_name: Option<String>,
+    ) {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())
@@ -1181,7 +1591,7 @@ impl TorrentManager {
             .ok()
             .and_then(|u| {
                 u.path_segments()
-                    .and_then(|s| s.last().filter(|s| !s.is_empty()))
+                    .and_then(|mut s| s.next_back().filter(|s| !s.is_empty()))
                     .map(|s| s.to_string())
             })
             .unwrap_or_else(|| "download".to_string());
@@ -1191,8 +1601,15 @@ impl TorrentManager {
 
         // If file already exists, append a numeric suffix
         let final_save_path = if save_path.exists() {
-            let stem = save_path.file_stem().unwrap_or_default().to_string_lossy().to_string();
-            let ext = save_path.extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default();
+            let stem = save_path
+                .file_stem()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string();
+            let ext = save_path
+                .extension()
+                .map(|e| format!(".{}", e.to_string_lossy()))
+                .unwrap_or_default();
             let parent = save_path.parent().unwrap_or(std::path::Path::new("."));
             let mut counter = 1;
             loop {
@@ -1209,33 +1626,42 @@ impl TorrentManager {
         // Register the download
         {
             let mut downloads = self.http_downloads.lock().unwrap();
-            downloads.insert(id, HttpDownload {
+            downloads.insert(
                 id,
-                url: url_owned.clone(),
-                file_name: if final_save_path != save_path_str {
-                    // Use the actual filename including the (N) suffix
-                    std::path::Path::new(&final_save_path)
-                        .file_name()
-                        .unwrap_or_default()
-                        .to_string_lossy()
-                        .to_string()
-                } else {
-                    file_name.clone()
+                HttpDownload {
+                    id,
+                    url: url_owned.clone(),
+                    file_name: if final_save_path != save_path_str {
+                        // Use the actual filename including the (N) suffix
+                        std::path::Path::new(&final_save_path)
+                            .file_name()
+                            .unwrap_or_default()
+                            .to_string_lossy()
+                            .to_string()
+                    } else {
+                        file_name.clone()
+                    },
+                    save_path: final_save_path.clone(),
+                    total_bytes: 0,
+                    downloaded_bytes: 0,
+                    speed: 0,
+                    status: "downloading".to_string(),
+                    error_msg: None,
                 },
-                save_path: final_save_path.clone(),
-                total_bytes: 0,
-                downloaded_bytes: 0,
-                speed: 0,
-                status: "downloading".to_string(),
-                error_msg: None,
-            });
+            );
         }
 
         id
     }
 
     /// Update an HTTP download's progress (called from the download task).
-    pub fn update_http_progress(&self, id: u32, downloaded_bytes: u64, total_bytes: u64, speed: u64) {
+    pub fn update_http_progress(
+        &self,
+        id: u32,
+        downloaded_bytes: u64,
+        total_bytes: u64,
+        speed: u64,
+    ) {
         let mut downloads = self.http_downloads.lock().unwrap();
         if let Some(dl) = downloads.get_mut(&id) {
             dl.downloaded_bytes = downloaded_bytes;
@@ -1303,36 +1729,38 @@ impl TorrentManager {
     /// Collect HTTP downloads as synthetic torrent entries for the frontend.
     pub fn http_downloads_as_torrents(&self) -> Vec<Value> {
         let downloads = self.http_downloads.lock().unwrap();
-        downloads.values().map(|dl| {
+        downloads
+            .values()
+            .map(|dl| {
+                let state = match dl.status.as_str() {
+                    "completed" => "seeding",
+                    "error" => "error",
+                    _ => "downloading",
+                };
 
-            let state = match dl.status.as_str() {
-                "completed" => "seeding",
-                "error" => "error",
-                _ => "downloading",
-            };
-
-            serde_json::json!({
-                "id": dl.id,
-                "name": dl.file_name,
-                "info_hash": format!("http_{}", dl.id),
-                "forced": false,
-                "stats": {
-                    "state": state,
-                    "total_bytes": dl.total_bytes,
-                    "progress_bytes": dl.downloaded_bytes,
-                    "uploaded_bytes": 0u64,
-                    "finished": dl.status == "completed",
-                    "error": if dl.status == "error" { dl.error_msg.clone() } else { None },
-                    "peers": 0u64,
-                    "seeds": 0u64,
-                    "live": {
-                        "download_speed": dl.speed,
-                        "upload_speed": 0u64,
-                        "time_remaining": Value::Null,
+                serde_json::json!({
+                    "id": dl.id,
+                    "name": dl.file_name,
+                    "info_hash": format!("http_{}", dl.id),
+                    "forced": false,
+                    "stats": {
+                        "state": state,
+                        "total_bytes": dl.total_bytes,
+                        "progress_bytes": dl.downloaded_bytes,
+                        "uploaded_bytes": 0u64,
+                        "finished": dl.status == "completed",
+                        "error": if dl.status == "error" { dl.error_msg.clone() } else { None },
+                        "peers": 0u64,
+                        "seeds": 0u64,
+                        "live": {
+                            "download_speed": dl.speed,
+                            "upload_speed": 0u64,
+                            "time_remaining": Value::Null,
+                        }
                     }
-                }
+                })
             })
-        }).collect()
+            .collect()
     }
 
     // ── Network Bind Address ────────────────────────────────────
@@ -1358,7 +1786,12 @@ impl TorrentManager {
     }
 
     pub fn get_torrent_utp(&self, id: u32) -> Option<bool> {
-        self.config.lock().unwrap().per_torrent_utp.get(&id).copied()
+        self.config
+            .lock()
+            .unwrap()
+            .per_torrent_utp
+            .get(&id)
+            .copied()
     }
 
     pub fn set_torrent_utp(&self, id: u32, enabled: Option<bool>) {
@@ -1402,7 +1835,12 @@ impl TorrentManager {
     }
 
     pub fn get_torrent_dht(&self, id: u32) -> Option<bool> {
-        self.config.lock().unwrap().per_torrent_dht.get(&id).copied()
+        self.config
+            .lock()
+            .unwrap()
+            .per_torrent_dht
+            .get(&id)
+            .copied()
     }
 
     pub fn set_torrent_dht(&self, id: u32, disabled: Option<bool>) {
@@ -1417,7 +1855,12 @@ impl TorrentManager {
     }
 
     pub fn get_torrent_pex(&self, id: u32) -> Option<bool> {
-        self.config.lock().unwrap().per_torrent_pex.get(&id).copied()
+        self.config
+            .lock()
+            .unwrap()
+            .per_torrent_pex
+            .get(&id)
+            .copied()
     }
 
     pub fn set_torrent_pex(&self, id: u32, disabled: Option<bool>) {
@@ -1432,7 +1875,12 @@ impl TorrentManager {
     }
 
     pub fn get_torrent_lpd(&self, id: u32) -> Option<bool> {
-        self.config.lock().unwrap().per_torrent_lpd.get(&id).copied()
+        self.config
+            .lock()
+            .unwrap()
+            .per_torrent_lpd
+            .get(&id)
+            .copied()
     }
 
     pub fn set_torrent_lpd(&self, id: u32, disabled: Option<bool>) {
@@ -1468,7 +1916,10 @@ impl TorrentManager {
 
     pub fn set_encryption_mode(&self, mode: String) {
         if mode != "forced" && mode != "enabled" && mode != "disabled" {
-            log::warn!("Invalid encryption mode: {}. Defaulting to 'enabled'.", mode);
+            log::warn!(
+                "Invalid encryption mode: {}. Defaulting to 'enabled'.",
+                mode
+            );
             return;
         }
         self.config.lock().unwrap().encryption_mode = mode;
@@ -1476,7 +1927,12 @@ impl TorrentManager {
     }
 
     pub fn get_torrent_encryption(&self, id: u32) -> Option<String> {
-        self.config.lock().unwrap().per_torrent_encryption.get(&id).cloned()
+        self.config
+            .lock()
+            .unwrap()
+            .per_torrent_encryption
+            .get(&id)
+            .cloned()
     }
 
     pub fn set_torrent_encryption(&self, id: u32, mode: Option<String>) {
@@ -1498,10 +1954,20 @@ impl TorrentManager {
         self.config.lock().unwrap().portfolios.clone()
     }
 
-    pub fn add_portfolio(&self, name: String, icon: String, filter: String) -> crate::config::Portfolio {
+    pub fn add_portfolio(
+        &self,
+        name: String,
+        icon: String,
+        filter: String,
+    ) -> crate::config::Portfolio {
         let mut cfg = self.config.lock().unwrap();
         let id = cfg.next_portfolio_id();
-        let portfolio = crate::config::Portfolio { id, name, icon, filter };
+        let portfolio = crate::config::Portfolio {
+            id,
+            name,
+            icon,
+            filter,
+        };
         cfg.portfolios.push(portfolio.clone());
         drop(cfg);
         self.save_config();
@@ -1520,26 +1986,46 @@ impl TorrentManager {
     }
 
     pub fn remove_portfolio(&self, id: u32) {
-        self.config.lock().unwrap().portfolios.retain(|p| p.id != id);
+        self.config
+            .lock()
+            .unwrap()
+            .portfolios
+            .retain(|p| p.id != id);
         self.save_config();
     }
 
     // ── Dead code ────────────────────────────────────────────────
 
     #[allow(dead_code)]
-    pub async fn add_torrent_with_limits(&self, url: &str, dl_limit: Option<u32>, ul_limit: Option<u32>) -> Result<u32> {
+    pub async fn add_torrent_with_limits(
+        &self,
+        url: &str,
+        dl_limit: Option<u32>,
+        ul_limit: Option<u32>,
+    ) -> Result<u32> {
         let opts = Some(AddTorrentOptions {
             overwrite: true,
-            ratelimits: LimitsConfig { download_bps: dl_limit.and_then(NonZeroU32::new), upload_bps: ul_limit.and_then(NonZeroU32::new) },
+            ratelimits: LimitsConfig {
+                download_bps: dl_limit.and_then(NonZeroU32::new),
+                upload_bps: ul_limit.and_then(NonZeroU32::new),
+            },
             ..Default::default()
         });
-        let resp = self.session.add_torrent(AddTorrent::from_url(url), opts).await?;
+        let resp = self
+            .session
+            .add_torrent(AddTorrent::from_url(url), opts)
+            .await?;
         let handle = resp.into_handle().context("Failed to get torrent handle")?;
-        Ok(handle.id().try_into().map_err(|_| anyhow::anyhow!("Torrent ID overflow"))?)
+        handle
+            .id()
+            .try_into()
+            .map_err(|_| anyhow::anyhow!("Torrent ID overflow"))
     }
 
     fn find_handle(&self, id: u32) -> Result<Arc<ManagedTorrent>> {
-        self.session.get(TorrentIdOrHash::Id(id as usize)).context("Torrent not found")
+        self.session
+            .get(TorrentIdOrHash::Id(id as usize))
+            .context("Torrent not found")
     }
 }
 
@@ -1548,10 +2034,22 @@ pub struct ManagerHandle {
 }
 
 impl ManagerHandle {
-    pub fn new() -> Self { Self { inner: std::sync::OnceLock::new() } }
-    pub fn set_ready(&self, mgr: TorrentManager) { let _ = self.inner.set(Ok(Arc::new(mgr))); }
-    pub fn set_error(&self, err: String) { let _ = self.inner.set(Err(err)); }
+    pub fn new() -> Self {
+        Self {
+            inner: std::sync::OnceLock::new(),
+        }
+    }
+    pub fn set_ready(&self, mgr: TorrentManager) {
+        let _ = self.inner.set(Ok(Arc::new(mgr)));
+    }
+    pub fn set_error(&self, err: String) {
+        let _ = self.inner.set(Err(err));
+    }
     pub fn get(&self) -> std::result::Result<&Arc<TorrentManager>, &str> {
-        match self.inner.get() { Some(Ok(m)) => Ok(m), Some(Err(e)) => Err(e), None => Err("Torrent engine is still starting\u{2026}") }
+        match self.inner.get() {
+            Some(Ok(m)) => Ok(m),
+            Some(Err(e)) => Err(e),
+            None => Err("Torrent engine is still starting\u{2026}"),
+        }
     }
 }
