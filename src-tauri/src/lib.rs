@@ -48,9 +48,11 @@ pub(crate) fn build_clean_payload(mgr: &TorrentManager) -> Value {
     mgr.ensure_added_at_batch(&hashes);
     let added_at = mgr.added_at_map();
     let seed_sources = mgr.seed_sources_snapshot();
-    let forced_ids = mgr.forced_snapshot();
-    let sequential_ids = mgr.sequential_snapshot();
-    let super_seed_ids = mgr.super_seed_snapshot();
+    let flags = TorrentFlags {
+        forced: mgr.forced_snapshot(),
+        sequential: mgr.sequential_snapshot(),
+        super_seed: mgr.super_seed_snapshot(),
+    };
 
     let mut active_downloads: u64 = 0;
     let mut active_seeds: u64 = 0;
@@ -62,9 +64,7 @@ pub(crate) fn build_clean_payload(mgr: &TorrentManager) -> Value {
         .map(|t| {
             let mapped = map_torrent(
                 t,
-                &forced_ids,
-                &sequential_ids,
-                &super_seed_ids,
+                &flags,
                 &added_at,
                 &seed_sources,
                 &mut active_downloads,
@@ -171,11 +171,16 @@ fn compute_health(seeds: u64, peers: u64, finished: bool, age_secs: u64) -> Valu
     })
 }
 
+/// Per-torrent flag sets (forced / sequential / super-seed) looked up by id.
+struct TorrentFlags {
+    forced: HashSet<u32>,
+    sequential: HashSet<u32>,
+    super_seed: HashSet<u32>,
+}
+
 fn map_torrent(
     t: &Value,
-    forced_ids: &HashSet<u32>,
-    sequential_ids: &HashSet<u32>,
-    super_seed_ids: &HashSet<u32>,
+    flags: &TorrentFlags,
     added_at: &HashMap<String, u64>,
     seed_sources: &HashMap<u32, u32>,
     active_downloads: &mut u64,
@@ -210,9 +215,9 @@ fn map_torrent(
         .and_then(|l| l["snapshot"]["peer_stats"]["live"].as_u64())
         .unwrap_or(0);
     let id = t["id"].as_u64().unwrap_or(0) as u32;
-    let forced = forced_ids.contains(&id);
-    let sequential = sequential_ids.contains(&id);
-    let super_seed = super_seed_ids.contains(&id);
+    let forced = flags.forced.contains(&id);
+    let sequential = flags.sequential.contains(&id);
+    let super_seed = flags.super_seed.contains(&id);
     let info_hash = t["info_hash"].as_str().unwrap_or("");
     let added_ts = added_at.get(info_hash).copied().unwrap_or(0);
     let seeds = seed_sources.get(&id).copied().unwrap_or(0) as u64;

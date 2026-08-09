@@ -76,7 +76,7 @@ pub async fn delete_torrent(
 #[tauri::command]
 pub async fn get_stats(mgr: State<'_, Mgr>) -> Result<Value, String> {
     let tm = mgr.get().map_err(|e| e.to_string())?;
-    Ok(crate::build_clean_payload(&tm))
+    Ok(crate::build_clean_payload(tm))
 }
 
 #[tauri::command]
@@ -1010,7 +1010,7 @@ pub async fn export_torrents_to_file(
     format: String,
 ) -> Result<u32, String> {
     let tm = mgr.get().map_err(|e| e.to_string())?;
-    let payload = crate::build_clean_payload(&tm);
+    let payload = crate::build_clean_payload(tm);
     let torrents = payload["torrents"].as_array().cloned().unwrap_or_default();
 
     let count = torrents.len() as u32;
@@ -1207,7 +1207,7 @@ async fn import_torrents_csv_inner(
 #[tauri::command]
 pub async fn export_torrents_json(mgr: State<'_, Mgr>) -> Result<String, String> {
     let tm = mgr.get().map_err(|e| e.to_string())?;
-    let payload = crate::build_clean_payload(&tm);
+    let payload = crate::build_clean_payload(tm);
     let torrents = payload["torrents"].as_array().cloned().unwrap_or_default();
     let export: Vec<serde_json::Value> = torrents
         .iter()
@@ -1236,7 +1236,7 @@ pub async fn export_torrents_json(mgr: State<'_, Mgr>) -> Result<String, String>
 #[tauri::command]
 pub async fn export_torrents_csv(mgr: State<'_, Mgr>) -> Result<String, String> {
     let tm = mgr.get().map_err(|e| e.to_string())?;
-    let payload = crate::build_clean_payload(&tm);
+    let payload = crate::build_clean_payload(tm);
     let torrents = payload["torrents"].as_array().cloned().unwrap_or_default();
 
     let mut csv =
