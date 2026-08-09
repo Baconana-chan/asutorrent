@@ -32,7 +32,9 @@ const ICON_32_PNG: &[u8] = include_bytes!("../icons/32x32.png");
 const ICON_128_PNG: &[u8] = include_bytes!("../icons/128x128.png");
 
 pub(crate) fn build_clean_payload(mgr: &TorrentManager) -> Value {
-    let list = mgr.api.api_torrent_list_ext(ApiTorrentListOpts { with_stats: true });
+    let list = mgr
+        .api
+        .api_torrent_list_ext(ApiTorrentListOpts { with_stats: true });
     let session_stats = mgr.api.api_session_stats();
     let list_val = serde_json::to_value(&list).unwrap_or_default();
     let stats_val = serde_json::to_value(&session_stats).unwrap_or_default();
@@ -225,7 +227,11 @@ fn map_torrent(
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs())
         .unwrap_or(0);
-    let age_secs = if added_ts > 0 { now.saturating_sub(added_ts) } else { 0 };
+    let age_secs = if added_ts > 0 {
+        now.saturating_sub(added_ts)
+    } else {
+        0
+    };
     let health = compute_health(seeds, peers, finished, age_secs);
     serde_json::json!({
         "id": t["id"], "name": t["name"], "info_hash": t["info_hash"], "forced": forced, "sequential": sequential, "super_seed": super_seed,
@@ -490,7 +496,11 @@ fn magnet_display_name(url: &str) -> Option<String> {
     // `+` encodes a space in query strings; `%XX` handled by urlencoding.
     let dn = dn.replace('+', " ");
     let decoded = urlencoding::decode(&dn).ok()?.into_owned();
-    let cleaned: String = decoded.chars().filter(|c| !c.is_control()).take(200).collect();
+    let cleaned: String = decoded
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(200)
+        .collect();
     Some(cleaned)
 }
 

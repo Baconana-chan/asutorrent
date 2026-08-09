@@ -384,7 +384,10 @@ pub async fn set_watch_folder(mgr: State<'_, Mgr>, path: Option<String>) -> Resu
 
 #[tauri::command]
 pub async fn get_clipboard_monitor(mgr: State<'_, Mgr>) -> Result<bool, String> {
-    Ok(mgr.get().map_err(|e| e.to_string())?.get_clipboard_monitor())
+    Ok(mgr
+        .get()
+        .map_err(|e| e.to_string())?
+        .get_clipboard_monitor())
 }
 
 #[tauri::command]

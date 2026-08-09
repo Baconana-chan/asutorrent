@@ -471,11 +471,7 @@ impl TorrentManager {
     /// (used by the preview dialog). An empty selection legitimately means
     /// "download nothing" — the caller always supplies the full list when
     /// nothing was deselected, so `update_only_files` is applied unconditionally.
-    pub async fn add_torrent_file_selected(
-        &self,
-        path: &str,
-        selected: Vec<usize>,
-    ) -> Result<u32> {
+    pub async fn add_torrent_file_selected(&self, path: &str, selected: Vec<usize>) -> Result<u32> {
         let id = self.add_torrent_file(path).await?;
         self.update_only_files(id, selected).await?;
         Ok(id)
@@ -1288,13 +1284,7 @@ impl TorrentManager {
         tag
     }
 
-    pub fn update_tag(
-        &self,
-        id: u32,
-        name: String,
-        color: String,
-        auto_rule: Option<String>,
-    ) {
+    pub fn update_tag(&self, id: u32, name: String, color: String, auto_rule: Option<String>) {
         let mut cfg = self.config.lock().unwrap();
         if let Some(tag) = cfg.tags.iter_mut().find(|t| t.id == id) {
             tag.name = name;
@@ -1391,11 +1381,14 @@ impl TorrentManager {
         let mut sources: HashMap<u32, u32> = HashMap::new();
         for t in &list.torrents {
             let Some(id) = t.id else { continue };
-            let Ok(snapshot) = self.api.api_peer_stats(
-                TorrentIdOrHash::Id(id),
-                Default::default(),
-            ) else {
-                log::debug!("update_seed_sources: peer stats unavailable for torrent {}", id);
+            let Ok(snapshot) = self
+                .api
+                .api_peer_stats(TorrentIdOrHash::Id(id), Default::default())
+            else {
+                log::debug!(
+                    "update_seed_sources: peer stats unavailable for torrent {}",
+                    id
+                );
                 continue;
             };
             let val = serde_json::to_value(&snapshot).unwrap_or_default();
