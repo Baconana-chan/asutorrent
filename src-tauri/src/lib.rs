@@ -16,25 +16,42 @@ use tauri_plugin_notification::NotificationExt;
 use serde_json::Value;
 use torrent_mgr::{ManagerHandle, TorrentManager};
 
-use librqbit::api::{Api, ApiTorrentListOpts};
+use librqbit::api::ApiTorrentListOpts;
 
 /// Type alias for the JoinHandle returned by tauri::async_runtime::spawn.
 pub(crate) type JoinHandle = tauri::async_runtime::JoinHandle<()>;
 
+/// Tray menu plus handles to its two dynamic status lines.
+type TrayMenuParts = (
+    tauri::menu::Menu<tauri::Wry>,
+    tauri::menu::MenuItem<tauri::Wry>,
+    tauri::menu::MenuItem<tauri::Wry>,
+);
+
 const ICON_32_PNG: &[u8] = include_bytes!("../icons/32x32.png");
 const ICON_128_PNG: &[u8] = include_bytes!("../icons/128x128.png");
 
-pub(crate) fn build_clean_payload(
-    api: &Api,
-    forced_ids: &HashSet<u32>,
-    session_start: Option<std::time::SystemTime>,
-    sequential_ids: &HashSet<u32>,
-) -> Value {
-    let list = api.api_torrent_list_ext(ApiTorrentListOpts { with_stats: true });
-    let session_stats = api.api_session_stats();
+pub(crate) fn build_clean_payload(mgr: &TorrentManager) -> Value {
+    let list = mgr.api.api_torrent_list_ext(ApiTorrentListOpts { with_stats: true });
+    let session_stats = mgr.api.api_session_stats();
     let list_val = serde_json::to_value(&list).unwrap_or_default();
     let stats_val = serde_json::to_value(&session_stats).unwrap_or_default();
     let raw_torrents: Vec<Value> = list_val["torrents"].as_array().cloned().unwrap_or_default();
+
+    // Make sure every torrent has an "added at" timestamp recorded before we
+    // build the health payload. Idempotent and batched (config mutex taken
+    // once); also covers torrents restored from persistence.
+    let hashes: Vec<&str> = raw_torrents
+        .iter()
+        .map(|t| t["info_hash"].as_str().unwrap_or(""))
+        .collect();
+    mgr.ensure_added_at_batch(&hashes);
+    let added_at = mgr.added_at_map();
+    let seed_sources = mgr.seed_sources_snapshot();
+    let forced_ids = mgr.forced_snapshot();
+    let sequential_ids = mgr.sequential_snapshot();
+    let super_seed_ids = mgr.super_seed_snapshot();
+
     let mut active_downloads: u64 = 0;
     let mut active_seeds: u64 = 0;
     let mut total_downloaded: u64 = 0;
@@ -45,8 +62,11 @@ pub(crate) fn build_clean_payload(
         .map(|t| {
             let mapped = map_torrent(
                 t,
-                forced_ids,
-                sequential_ids,
+                &forced_ids,
+                &sequential_ids,
+                &super_seed_ids,
+                &added_at,
+                &seed_sources,
                 &mut active_downloads,
                 &mut active_seeds,
             );
@@ -78,13 +98,10 @@ pub(crate) fn build_clean_payload(
         .unwrap_or(0);
 
     // Compute uptime in seconds
-    let uptime_secs = session_start
-        .and_then(|start| {
-            std::time::SystemTime::now()
-                .duration_since(start)
-                .ok()
-                .map(|d| d.as_secs())
-        })
+    let uptime_secs = std::time::SystemTime::now()
+        .duration_since(mgr.session_start)
+        .ok()
+        .map(|d| d.as_secs())
         .unwrap_or(0);
 
     serde_json::json!({
@@ -102,10 +119,65 @@ pub(crate) fn build_clean_payload(
     })
 }
 
+/// Rough health estimate for a torrent based on the swarm signals we have:
+/// estimated seed sources, live peers, whether we already hold the data, and
+/// the torrent's age. librqbit does not expose per-peer piece completion, so
+/// `seeds` is a lower bound (peers who demonstrably fed us data) and
+/// `availability` is a soft estimate in 0..1.
+fn compute_health(seeds: u64, peers: u64, finished: bool, age_secs: u64) -> Value {
+    let (score, label): (u64, &str) = if finished {
+        // We hold the full data; health reflects reseed value of the swarm.
+        if seeds >= 3 {
+            (85, "excellent")
+        } else if seeds >= 1 {
+            (70, "good")
+        } else if peers >= 1 {
+            (55, "medium")
+        } else {
+            (40, "low")
+        }
+    } else if seeds >= 10 {
+        (95, "excellent")
+    } else if seeds >= 5 {
+        (85, "excellent")
+    } else if seeds >= 2 {
+        (70, "good")
+    } else if seeds == 1 {
+        (55, "medium")
+    } else if peers >= 5 {
+        (50, "medium")
+    } else if peers >= 1 {
+        (35, "low")
+    } else {
+        // No sources at all — a very old torrent here is likely dead.
+        if age_secs > 86400 * 30 {
+            (5, "dead")
+        } else {
+            (15, "dead")
+        }
+    };
+    let availability = if finished {
+        1.0
+    } else {
+        (seeds as f64 / 5.0).min(1.0)
+    };
+    serde_json::json!({
+        "score": score,
+        "label": label,
+        "seeds": seeds,
+        "peers": peers,
+        "age_secs": age_secs,
+        "availability": availability,
+    })
+}
+
 fn map_torrent(
     t: &Value,
     forced_ids: &HashSet<u32>,
     sequential_ids: &HashSet<u32>,
+    super_seed_ids: &HashSet<u32>,
+    added_at: &HashMap<String, u64>,
+    seed_sources: &HashMap<u32, u32>,
     active_downloads: &mut u64,
     active_seeds: &mut u64,
 ) -> Value {
@@ -140,8 +212,19 @@ fn map_torrent(
     let id = t["id"].as_u64().unwrap_or(0) as u32;
     let forced = forced_ids.contains(&id);
     let sequential = sequential_ids.contains(&id);
+    let super_seed = super_seed_ids.contains(&id);
+    let info_hash = t["info_hash"].as_str().unwrap_or("");
+    let added_ts = added_at.get(info_hash).copied().unwrap_or(0);
+    let seeds = seed_sources.get(&id).copied().unwrap_or(0) as u64;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let age_secs = if added_ts > 0 { now.saturating_sub(added_ts) } else { 0 };
+    let health = compute_health(seeds, peers, finished, age_secs);
     serde_json::json!({
-        "id": t["id"], "name": t["name"], "info_hash": t["info_hash"], "forced": forced, "sequential": sequential,
+        "id": t["id"], "name": t["name"], "info_hash": t["info_hash"], "forced": forced, "sequential": sequential, "super_seed": super_seed,
+        "health": health,
         "stats": {
             "state": state,
             "total_bytes": stats.and_then(|s| s["total_bytes"].as_u64()).unwrap_or(0),
@@ -149,7 +232,7 @@ fn map_torrent(
             "uploaded_bytes": stats.and_then(|s| s["uploaded_bytes"].as_u64()).unwrap_or(0),
             "finished": finished,
             "error": stats.and_then(|s| s["error"].as_str().map(String::from)),
-            "peers": peers, "seeds": 0u64,
+            "peers": peers, "seeds": seeds,
             "live": if live_val.is_some() { Some(serde_json::json!({"download_speed": dl_speed, "upload_speed": ul_speed, "time_remaining": time_remaining})) } else { None },
         }
     })
@@ -181,17 +264,16 @@ async fn stats_emitter_loop(
     tracker: NotificationTracker,
     idle_icon: tauri::image::Image<'static>,
     active_icon: tauri::image::Image<'static>,
+    status_line: tauri::menu::MenuItem<tauri::Wry>,
+    speed_line: tauri::menu::MenuItem<tauri::Wry>,
 ) {
     let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(1));
     let mut first_tick = true;
-    let mut menu_tick = 0u64;
+    let mut last_status_text = String::new();
+    let mut last_speed_text = String::new();
     loop {
         interval.tick().await;
-        menu_tick += 1;
-        let forced = mgr.forced_snapshot();
-        let sequential = mgr.sequential_snapshot();
-        let mut payload =
-            build_clean_payload(&mgr.api, &forced, Some(mgr.session_start), &sequential);
+        let mut payload = build_clean_payload(&mgr);
 
         // Inject HTTP/FTP downloads as synthetic torrent entries
         let http_torrents = mgr.http_downloads_as_torrents();
@@ -303,7 +385,7 @@ async fn stats_emitter_loop(
                 Some(idle_icon.clone())
             });
 
-            // ── Dynamic right-click menu (every 2s) ────────────────
+            // ── Update tray menu status lines in place ─────────────
             let torrents = payload["torrents"].as_array().cloned().unwrap_or_default();
 
             // Count torrent states for summary
@@ -317,19 +399,25 @@ async fn stats_emitter_loop(
                 }
             }
 
-            // Build menu (every 3 seconds to reduce churn)
-            if menu_tick.is_multiple_of(3) {
-                let total_active = dl_count + seed_count;
-                if let Ok(menu) = build_tray_menu(
-                    &app_handle,
-                    dl_count,
-                    seed_count,
-                    total_active,
-                    &fmt_dl,
-                    &fmt_ul,
-                ) {
-                    let _ = tray.set_menu(Some(menu));
-                }
+            // Update the status lines of the (fixed) tray menu. The menu is
+            // never rebuilt here: repeatedly calling `set_menu` on Windows
+            // churns HMENUs/subclasses and breaks the right-click menu.
+            // `set_text` updates the existing items in place (SetMenuItemInfoW).
+            let status_text = if dl_count + seed_count > 0 {
+                format!("⬇ {} downloading  |  ⬆ {} seeding", dl_count, seed_count)
+            } else {
+                "No active torrents".to_string()
+            };
+            let speed_text = format!("DL {}  /  UL {}", fmt_dl, fmt_ul);
+            // Only touch the items when the text actually changed, to avoid
+            // dispatching a main-thread update (SetMenuItemInfoW) every tick.
+            if status_text != last_status_text {
+                let _ = status_line.set_text(status_text.clone());
+                last_status_text = status_text;
+            }
+            if speed_text != last_speed_text {
+                let _ = speed_line.set_text(speed_text.clone());
+                last_speed_text = speed_text;
             }
         }
 
@@ -360,6 +448,84 @@ async fn auto_management_loop(mgr: Arc<TorrentManager>) {
     }
 }
 
+/// Periodically refresh the per-torrent seed-source estimate used by the
+/// health indicator. Iterates the (cheap, cached) peer stats snapshots.
+async fn seed_source_loop(mgr: Arc<TorrentManager>) {
+    let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(30));
+    loop {
+        interval.tick().await;
+        mgr.update_seed_sources();
+    }
+}
+
+async fn watch_folder_loop(mgr: Arc<TorrentManager>) {
+    let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(5));
+    loop {
+        interval.tick().await;
+        let added = mgr.scan_watch_folder().await;
+        if added > 0 {
+            log::info!("Watch folder: added {} torrent(s)", added);
+        }
+    }
+}
+
+/// Extract the first magnet link from arbitrary clipboard text. A trailing
+/// period (sentence punctuation) is trimmed — display name only, never used
+/// to build the add request.
+fn extract_magnet(text: &str) -> Option<String> {
+    let re = regex::Regex::new(r#"(?i)\bmagnet:[^\s<>"']+"#).ok()?;
+    re.find(text)
+        .map(|m| m.as_str().trim_end_matches('.').to_string())
+}
+
+/// Pull a human-readable display name from the magnet's `dn=` parameter.
+fn magnet_display_name(url: &str) -> Option<String> {
+    let body = url.strip_prefix("magnet:?").unwrap_or(url);
+    let dn = body.split('&').find_map(|p| p.strip_prefix("dn="))?;
+    // `+` encodes a space in query strings; `%XX` handled by urlencoding.
+    let dn = dn.replace('+', " ");
+    let decoded = urlencoding::decode(&dn).ok()?.into_owned();
+    let cleaned: String = decoded.chars().filter(|c| !c.is_control()).take(200).collect();
+    Some(cleaned)
+}
+
+/// Poll the clipboard for magnet links and notify the UI when a new one
+/// appears. A prompt is emitted only when the clipboard *text* changes,
+/// so the same link sitting in the clipboard is never re-offered.
+async fn clipboard_monitor_loop(app_handle: tauri::AppHandle, mgr: Arc<TorrentManager>) {
+    let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(2));
+    let mut last_text: Option<String> = None;
+    loop {
+        interval.tick().await;
+        if !mgr.get_clipboard_monitor() {
+            continue;
+        }
+        // arboard is blocking and not Send; read it on a blocking thread.
+        let clip = tokio::task::spawn_blocking(|| {
+            arboard::Clipboard::new()
+                .ok()
+                .and_then(|mut c| c.get_text().ok())
+        })
+        .await
+        .unwrap_or(None);
+        let Some(text) = clip else { continue };
+        if last_text.as_deref() == Some(text.as_str()) {
+            continue;
+        }
+        let Some(url) = extract_magnet(&text) else {
+            last_text = Some(text);
+            continue;
+        };
+        last_text = Some(text);
+        let name = magnet_display_name(&url);
+        log::info!("Clipboard magnet detected: {}", &url[..60.min(url.len())]);
+        let _ = app_handle.emit(
+            "clipboard-magnet",
+            &serde_json::json!({ "url": url, "name": name }),
+        );
+    }
+}
+
 async fn rss_poll_loop(app_handle: tauri::AppHandle, mgr: Arc<TorrentManager>) {
     let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(120));
     loop {
@@ -378,7 +544,14 @@ async fn rss_poll_loop(app_handle: tauri::AppHandle, mgr: Arc<TorrentManager>) {
     }
 }
 
-/// Build a dynamic tray menu with torrent activity status and quick actions.
+/// Build the tray menu with torrent activity status and quick actions.
+///
+/// The menu has a fixed structure and is built **once** at startup. The two
+/// status lines are updated in place afterwards (see `stats_emitter_loop`);
+/// rebuilding the menu repeatedly via `set_menu` churns HMENUs/subclasses on
+/// Windows and makes the tray's right-click menu stop working.
+///
+/// Returns the menu plus handles to the two dynamic status lines.
 fn build_tray_menu(
     app: &tauri::AppHandle,
     dl_count: u64,
@@ -386,42 +559,35 @@ fn build_tray_menu(
     total_active: u64,
     fmt_dl: &str,
     fmt_ul: &str,
-) -> Result<tauri::menu::Menu<tauri::Wry>, tauri::Error> {
+) -> Result<TrayMenuParts, tauri::Error> {
     use tauri::menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem};
 
-    let mut builder = MenuBuilder::new(app)
-        .item(&MenuItemBuilder::with_id("show_hide", "Show/Hide Window").build(app)?)
-        .item(&PredefinedMenuItem::separator(app)?);
-
-    if total_active > 0 {
-        let status = format!("⬇ {} downloading  |  ⬆ {} seeding", dl_count, seed_count);
-        builder = builder
-            .item(
-                &MenuItemBuilder::with_id("status_line", &status)
-                    .enabled(false)
-                    .build(app)?,
-            )
-            .item(
-                &MenuItemBuilder::with_id("speed_line", format!("DL {}  /  UL {}", fmt_dl, fmt_ul))
-                    .enabled(false)
-                    .build(app)?,
-            );
+    let status_text = if total_active > 0 {
+        format!("⬇ {} downloading  |  ⬆ {} seeding", dl_count, seed_count)
     } else {
-        builder = builder.item(
-            &MenuItemBuilder::with_id("idle_line", "No active torrents")
-                .enabled(false)
-                .build(app)?,
-        );
-    }
+        "No active torrents".to_string()
+    };
+    let status_line = MenuItemBuilder::with_id("status_line", status_text)
+        .enabled(false)
+        .build(app)?;
+    let speed_line =
+        MenuItemBuilder::with_id("speed_line", format!("DL {}  /  UL {}", fmt_dl, fmt_ul))
+            .enabled(false)
+            .build(app)?;
 
-    builder = builder
+    let menu = MenuBuilder::new(app)
+        .item(&MenuItemBuilder::with_id("show_hide", "Show/Hide Window").build(app)?)
+        .item(&PredefinedMenuItem::separator(app)?)
+        .item(&status_line)
+        .item(&speed_line)
         .item(&PredefinedMenuItem::separator(app)?)
         .item(&MenuItemBuilder::with_id("pause_all", "Pause All").build(app)?)
         .item(&MenuItemBuilder::with_id("resume_all", "Resume All").build(app)?)
         .item(&PredefinedMenuItem::separator(app)?)
-        .item(&MenuItemBuilder::with_id("quit", "Quit").build(app)?);
+        .item(&MenuItemBuilder::with_id("quit", "Quit").build(app)?)
+        .build()?;
 
-    builder.build()
+    Ok((menu, status_line, speed_line))
 }
 
 /// Run in headless mode (no Tauri window, only web API + scheduler loops).
@@ -452,12 +618,7 @@ pub fn run_headless() {
                     let mut first_tick = true;
                     loop {
                         interval.tick().await;
-                        let payload = build_clean_payload(
-                            &m1.api,
-                            &m1.forced_snapshot(),
-                            Some(m1.session_start),
-                            &m1.sequential_snapshot(),
-                        );
+                        let payload = build_clean_payload(&m1);
                         let dl = payload["stats"]["download_speed"].as_u64().unwrap_or(0);
                         let ul = payload["stats"]["upload_speed"].as_u64().unwrap_or(0);
 
@@ -535,6 +696,16 @@ pub fn run_headless() {
                     }
                 });
 
+                let m5 = mgr.clone();
+                tokio::spawn(async move {
+                    watch_folder_loop(m5).await;
+                });
+
+                let m6 = mgr.clone();
+                tokio::spawn(async move {
+                    seed_source_loop(m6).await;
+                });
+
                 // Start Web API + UI server (same as GUI mode)
                 web_api::start_server(mgr.clone());
 
@@ -595,8 +766,17 @@ pub fn run() {
             let (idle_icon, active_icon) = load_tray_images();
 
             // ── System tray with right-click menu ────────────────
+            // Build the menu once at startup. It must not be rebuilt later
+            // (set_menu churn breaks the Windows right-click menu); the status
+            // lines are updated in place from the stats loop instead.
+            let (tray_menu, status_line, speed_line) =
+                build_tray_menu(app.handle(), 0, 0, 0, "0 B/s", "0 B/s")
+                    .expect("Failed to build tray menu");
+
             let _tray = TrayIconBuilder::new()
                 .icon(idle_icon.clone())
+                .menu(&tray_menu)
+                .show_menu_on_left_click(false)
                 .tooltip("AsuTorrent — starting…")
                 .on_menu_event(|app, event| match event.id.as_ref() {
                     "show_hide" => {
@@ -689,23 +869,38 @@ pub fn run() {
                         let m3 = mgr_arc.clone();
                         let m4 = mgr_arc.clone();
                         let m5 = mgr_arc.clone();
+                        let m6 = mgr_arc.clone();
+                        let m7 = mgr_arc.clone();
+                        let m8 = mgr_arc.clone();
                         let ah = app_handle.clone();
                         let tracker: NotificationTracker =
                             Arc::new(std::sync::Mutex::new(HashMap::new()));
                         let idle = idle_icon.clone();
                         let active = active_icon.clone();
+                        let status = status_line.clone();
+                        let speed = speed_line.clone();
                         tauri::async_runtime::spawn(async move {
-                            stats_emitter_loop(ah, m1, tracker, idle, active).await;
+                            stats_emitter_loop(ah, m1, tracker, idle, active, status, speed).await;
                         });
                         let ah2 = app_handle.clone();
                         tauri::async_runtime::spawn(async move {
                             schedule_check_loop(ah2, m2).await;
                         });
+                        let ah3 = app_handle.clone();
                         tauri::async_runtime::spawn(async move {
                             rss_poll_loop(app_handle, m3).await;
                         });
                         tauri::async_runtime::spawn(async move {
                             auto_management_loop(m4).await;
+                        });
+                        tauri::async_runtime::spawn(async move {
+                            watch_folder_loop(m6).await;
+                        });
+                        tauri::async_runtime::spawn(async move {
+                            clipboard_monitor_loop(ah3, m7).await;
+                        });
+                        tauri::async_runtime::spawn(async move {
+                            seed_source_loop(m8).await;
                         });
                         // Start Web API + UI server
                         web_api::start_server(m5);
@@ -761,6 +956,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::add_magnet,
             commands::add_torrent_file,
+            commands::add_torrent_file_selected,
+            commands::preview_torrent_file,
             commands::pause_torrent,
             commands::resume_torrent,
             commands::force_resume_torrent,
@@ -800,8 +997,13 @@ pub fn run() {
             commands::get_tags,
             commands::add_tag,
             commands::remove_tag,
+            commands::update_tag,
             commands::get_global_download_path,
             commands::set_global_download_path,
+            commands::get_watch_folder,
+            commands::set_watch_folder,
+            commands::get_clipboard_monitor,
+            commands::set_clipboard_monitor,
             commands::get_full_config,
             commands::set_torrent_category,
             commands::get_torrent_category,
@@ -825,6 +1027,8 @@ pub fn run() {
             commands::set_global_utp_enabled,
             commands::get_torrent_utp,
             commands::set_torrent_utp,
+            commands::get_torrent_super_seed,
+            commands::set_torrent_super_seed,
             commands::get_global_disable_dht,
             commands::set_global_disable_dht,
             commands::get_global_disable_pex,

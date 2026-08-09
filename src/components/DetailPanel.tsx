@@ -3,11 +3,13 @@ import { useEffect } from "preact/hooks";
 import {
   torrents, getTorrentFiles, updateTorrentFiles,
   getCategories, getTags, getTorrentCategory, getTorrentTags, setTorrentCategory, setTorrentTags,
-  getTorrentPeers, getTorrentTrackers,
+  getTorrentPeers, getTorrentTrackers, refreshConfig, torrentTagMap,
 } from "../hooks/useTorrents";
 import type { TorrentFileEntry, CategoryPayload, TagPayload } from "../hooks/useTorrents";
 import { FileTree } from "./FileTree";
 import { fmtBytes, fmtSpeed } from "../utils/format";
+import { healthScoreColor, healthStatus, fmtAge, fmtAvailability } from "../utils/health";
+import { t as tt } from "../hooks/useLocales";
 
 type Tab = "info" | "peers" | "trackers" | "files";
 
@@ -39,11 +41,20 @@ export function DetailPanel({ selectedId, onPlayFile }: Props) {
     }).catch(() => {});
   }, [selectedId]);
 
+  // Keep the label pills in sync when labels change elsewhere (e.g. the
+  // context-menu toggle in the torrent table).
+  useEffect(() => {
+    if (selectedId === null) return;
+    const mapped = torrentTagMap.value[String(selectedId)];
+    if (mapped) torrentTagIds.value = mapped;
+  }, [selectedId, torrentTagMap.value]);
+
   const handleCategoryChange = async (catId: number | null) => {
     if (selectedId === null) return;
     try {
       await setTorrentCategory(selectedId, catId);
       torrentCatId.value = catId;
+      refreshConfig();
     } catch (e) { console.error(e); }
   };
 
@@ -56,6 +67,7 @@ export function DetailPanel({ selectedId, onPlayFile }: Props) {
     try {
       await setTorrentTags(selectedId, next);
       torrentTagIds.value = next;
+      refreshConfig();
     } catch (e) { console.error(e); }
   };
 
@@ -149,6 +161,51 @@ export function DetailPanel({ selectedId, onPlayFile }: Props) {
                 <InfoRow label="Upload speed" value={fmtSpeed(t.upload_speed)} />
                 <InfoRow label="Peers / Seeds" value={`${t.peers} / ${t.seeds}`} />
                 <InfoRow label="ETA" value={t.eta ? `${t.eta}s` : "—"} />
+
+                {/* Torrent health */}
+                {t.health && (
+                  <div class="health-section">
+                    <div class="health-section-head">
+                      <span class="health-section-label">{tt("health.title")}</span>
+                      <span
+                        class="health-section-status"
+                        style={`color: ${healthScoreColor(t.health.score)};`}
+                      >
+                        {healthStatus(t.health)}
+                      </span>
+                    </div>
+                    <div class="health-track health-section-track">
+                      <div
+                        class="health-fill"
+                        style={{
+                          width: `${Math.round(t.health.score)}%`,
+                          background: healthScoreColor(t.health.score),
+                        }}
+                      />
+                    </div>
+                    <div class="health-stats">
+                      <div class="health-stat">
+                        <span class="health-stat-label">{tt("health.seed_sources")}</span>
+                        <span class="health-stat-value">{t.health.seeds}</span>
+                      </div>
+                      <div class="health-stat">
+                        <span class="health-stat-label">{tt("health.peers")}</span>
+                        <span class="health-stat-value">{t.health.peers}</span>
+                      </div>
+                      <div class="health-stat">
+                        <span class="health-stat-label">{tt("health.age")}</span>
+                        <span class="health-stat-value">{fmtAge(t.health.age_secs)}</span>
+                      </div>
+                      <div class="health-stat">
+                        <span class="health-stat-label">{tt("health.availability")}</span>
+                        <span class="health-stat-value">
+                          {t.health.availability !== undefined && t.health.availability !== null ? "~" : ""}
+                          {fmtAvailability(t.health.availability)}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 {/* Category selector */}
                 <div class="info-row-cat">

@@ -2,6 +2,19 @@ import { useSignal } from "@preact/signals";
 import { AddTorrentModal } from "./AddTorrent";
 import { t, locale, noCase, LOCALES, type LocaleCode } from "../hooks/useLocales";
 
+/** Highlight the first case-insensitive match of `q` in `text`. */
+function Highlight({ text, q }: { text: string; q: string }) {
+  const i = q ? text.toLowerCase().indexOf(q.toLowerCase()) : -1;
+  if (i < 0) return <>{text}</>;
+  return (
+    <>
+      {text.slice(0, i)}
+      <mark class="locale-match">{text.slice(i, i + q.length)}</mark>
+      {text.slice(i + q.length)}
+    </>
+  );
+}
+
 interface Props {
   selectedCount: number;
   onPauseAll: () => void;
@@ -16,6 +29,7 @@ interface Props {
   onOpenSchedule: () => void;
   onOpenCategories: () => void;
   onOpenAutoMgmt: () => void;
+  onOpenWatchFolder: () => void;
   onExportJson: () => void;
   onExportCsv: () => void;
   onImport: () => void;
@@ -24,6 +38,7 @@ interface Props {
   onOpenUtp: () => void;
   onOpenNetworkFeatures: () => void;
   onOpenEncryption: () => void;
+  onOpenClipboard: () => void;
   onCreateTorrent: () => void;
   onOpenSearch: () => void;
   isDark: boolean;
@@ -34,13 +49,26 @@ interface Props {
 function LocaleSwitcher() {
   const open = useSignal(false);
   const search = useSignal("");
+  const highlight = useSignal(0); // index into the flattened list of options
   const current = locale.value;
 
-  const filtered = LOCALES.filter((l) =>
-    l.name.toLowerCase().includes(search.value.toLowerCase()) ||
-    l.native.toLowerCase().includes(search.value.toLowerCase()) ||
-    l.code.toLowerCase().includes(search.value.toLowerCase())
-  );
+  const q = search.value.trim().toLowerCase();
+  const matches = (l: (typeof LOCALES)[number]) =>
+    !q ||
+    l.name.toLowerCase().includes(q) ||
+    l.native.toLowerCase().includes(q) ||
+    l.code.toLowerCase().includes(q);
+
+  const groups: { label: string; items: (typeof LOCALES)[number][] }[] = [];
+  const real = LOCALES.filter((l) => l.group === "real" && matches(l));
+  const fan = LOCALES.filter((l) => l.group === "fan" && matches(l));
+  if (real.length) groups.push({ label: "Languages", items: real });
+  if (fan.length) groups.push({ label: "Fan", items: fan });
+
+  const total = real.length + fan.length;
+  const all = groups.flatMap((g) => g.items);
+  // Clamp the keyboard cursor without mutating a signal during render.
+  const hi = total ? Math.min(highlight.value, total - 1) : 0;
 
   const select = (code: LocaleCode) => {
     locale.value = code;
@@ -48,6 +76,15 @@ function LocaleSwitcher() {
     open.value = false;
     search.value = "";
   };
+
+  const move = (dir: 1 | -1) => {
+    if (!total) return;
+    highlight.value = (highlight.value + dir + total) % total;
+  };
+
+  // Build each option's flat index with a running cursor (O(n), not indexOf).
+  let cursor = 0;
+  const flatIndex = () => cursor++;
 
   // Close on click outside
   const handleBlur = (e: FocusEvent) => {
@@ -61,14 +98,37 @@ function LocaleSwitcher() {
     <div
       class="locale-switcher"
       onBlur={handleBlur}
-      onKeyDown={(e) => { if (e.key === "Escape") { open.value = false; search.value = ""; } }}
+      onKeyDown={(e) => {
+        // Only handle keys while the dropdown is open — otherwise Enter on
+        // the trigger button would fire this handler and select a locale.
+        if (!open.value) return;
+        if (e.key === "Escape") {
+          open.value = false;
+          search.value = "";
+        } else if (e.key === "ArrowDown") {
+          e.preventDefault();
+          move(1);
+        } else if (e.key === "ArrowUp") {
+          e.preventDefault();
+          move(-1);
+        } else if (e.key === "Enter") {
+          const opt = all[hi];
+          if (opt) {
+            e.preventDefault();
+            select(opt.code);
+          }
+        }
+      }}
       tabIndex={-1}
     >
       <button
         class={`toolbar-btn locale-trigger${open.value ? " active" : ""}`}
         onClick={() => {
           open.value = !open.value;
-          if (open.value) search.value = "";
+          if (open.value) {
+            search.value = "";
+            highlight.value = 0;
+          }
         }}
         title={t("toolbar.locale")}
       >
@@ -86,23 +146,37 @@ function LocaleSwitcher() {
               type="text"
               placeholder="Search…"
               value={search.value}
-              onInput={(e) => (search.value = (e.target as HTMLInputElement).value)}
+              onInput={(e) => {
+                search.value = (e.target as HTMLInputElement).value;
+                highlight.value = 0;
+              }}
               autoFocus
             />
           </div>
+          {q && total > 0 && (
+            <div class="locale-count">{total} of {LOCALES.length}</div>
+          )}
           <div class="locale-list">
-            {filtered.length === 0 && (
-              <div class="locale-empty">No matches</div>
-            )}
-            {filtered.map((l) => (
-              <button
-                class={`locale-option${l.code === current ? " active" : ""}`}
-                onClick={() => select(l.code)}
-              >
-                <span class="locale-option-native">{l.native}</span>
-                <span class="locale-option-name">{l.name}</span>
-                {l.code === current && <span class="locale-option-check">{'✓'}</span>}
-              </button>
+            {total === 0 && <div class="locale-empty">No matches</div>}
+            {groups.map((g) => (
+              <div key={g.label} class="locale-group">
+                <div class="locale-group-label">{g.label}</div>
+                {g.items.map((l) => {
+                  const idx = flatIndex();
+                  return (
+                    <button
+                      key={l.code}
+                      class={`locale-option${l.code === current ? " active" : ""}${idx === hi ? " highlighted" : ""}`}
+                      onMouseEnter={() => (highlight.value = idx)}
+                      onClick={() => select(l.code)}
+                    >
+                      <span class="locale-option-native"><Highlight text={l.native} q={q} /></span>
+                      <span class="locale-option-name"><Highlight text={l.name} q={q} /></span>
+                      {l.code === current && <span class="locale-option-check">{'✓'}</span>}
+                    </button>
+                  );
+                })}
+              </div>
             ))}
           </div>
         </div>
@@ -139,6 +213,7 @@ export function Toolbar({
   onOpenSchedule,
   onOpenCategories,
   onOpenAutoMgmt,
+  onOpenWatchFolder,
   onExportJson,
   onExportCsv,
   onImport,
@@ -147,6 +222,7 @@ export function Toolbar({
   onOpenUtp,
   onOpenNetworkFeatures,
   onOpenEncryption,
+  onOpenClipboard,
   onCreateTorrent,
   onOpenSearch,
   isDark,
@@ -293,6 +369,21 @@ export function Toolbar({
               <path d="M3 4h14v2H3V4zm0 5h14v2H3V9zm0 5h14v2H3v-2z" />
             </svg>
           </button>
+
+          <button
+            class="toolbar-btn"
+            onClick={onOpenWatchFolder}
+            title={t("toolbar.watch_folder")}
+          >
+            <svg
+              viewBox="0 0 20 20"
+              fill="currentColor"
+              style="width:16px;height:16px;"
+            >
+              <path d="M2 5c0-1.1.9-2 2-2h3.6c.4 0 .8.1 1.1.4L10 5h6c1.1 0 2 .9 2 2v8c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V5z"/>
+              <path d="M10.5 8.5v2.5H8l4.5 4.5L17 11h-2.5V8.5h-4z" opacity=".9"/>
+            </svg>
+          </button>
         </div>
 
         <div class="toolbar-spacer" />
@@ -343,6 +434,12 @@ export function Toolbar({
                 <circle cx="10" cy="5" r="2"/>
                 <path d="M10 8c-2 0-4 1-4 3h8c0-2-2-3-4-3z"/>
                 <path d="M6 12v2c0 1.1.9 2 2 2h4c1.1 0 2-.9 2-2v-2"/>
+              </svg>
+            </button>
+            <button class="toolbar-btn" onClick={onOpenClipboard} title={t("toolbar.clipboard", "Clipboard monitoring — detect magnet links copied")}>
+              <svg viewBox="0 0 20 20" fill="currentColor" style="width:15px;height:15px;">
+                <path d="M7 3h6a1 1 0 011 1v1h1a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V7a2 2 0 012-2h1V4a1 1 0 011-1zm6 2V4H7v1h6zM5 7v9h10V7H5z"/>
+                <path d="M7 11h6v1H7v-1zm0 3h6v1H7v-1z"/>
               </svg>
             </button>
             <button class="toolbar-btn" onClick={onOpenUtp} title={t("toolbar.utp")}>

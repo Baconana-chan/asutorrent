@@ -27,7 +27,7 @@ A modern, open-source BitTorrent client built with **Tauri 2** + **librqbit** + 
 - **Export/Import**: Save and restore torrent lists in JSON or CSV format
 
 ### ✨ Polish
-- **12 languages**: EN, RU, DE, FR, ES, PL, UK, ZH, ZH-TW, JA, KO, Pirate ☠️
+- **25 languages**: EN, EN-GB, RU, DE, DA, FR, IT, ES, ID, PL, PT, PT-BR, SV, NL, UK, ZH, ZH-TW, JA, KO, Pirate ☠️, Anime ✿, UwU 🐾, Caveman 🦴, Old English 🏰, New York 🗽
 - **Light/Dark theme**: Green-tinted light theme matching the dark aesthetic
 - **Column customization**: Show/hide and drag-to-reorder columns
 - **Video player**: Built-in streaming player with HTTP Range support (seek while downloading)

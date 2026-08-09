@@ -19,6 +19,26 @@ pub async fn add_torrent_file(mgr: State<'_, Mgr>, path: String) -> Result<u32, 
     tm.add_torrent_file(&path).await.map_err(|e| e.to_string())
 }
 
+/// Add a .torrent file restricted to the given file indices (from the preview dialog).
+#[tauri::command]
+pub async fn add_torrent_file_selected(
+    mgr: State<'_, Mgr>,
+    path: String,
+    selected: Vec<usize>,
+) -> Result<u32, String> {
+    let tm = mgr.get().map_err(|e| e.to_string())?;
+    tm.add_torrent_file_selected(&path, selected)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Parse a .torrent file and return its contents (name, files, trackers) WITHOUT adding it.
+#[tauri::command]
+pub async fn preview_torrent_file(mgr: State<'_, Mgr>, path: String) -> Result<Value, String> {
+    let tm = mgr.get().map_err(|e| e.to_string())?;
+    tm.preview_torrent_file(&path).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub async fn pause_torrent(mgr: State<'_, Mgr>, id: u32) -> Result<(), String> {
     let tm = mgr.get().map_err(|e| e.to_string())?;
@@ -56,12 +76,7 @@ pub async fn delete_torrent(
 #[tauri::command]
 pub async fn get_stats(mgr: State<'_, Mgr>) -> Result<Value, String> {
     let tm = mgr.get().map_err(|e| e.to_string())?;
-    Ok(crate::build_clean_payload(
-        &tm.api,
-        &tm.forced_snapshot(),
-        Some(tm.session_start),
-        &tm.sequential.lock().unwrap(),
-    ))
+    Ok(crate::build_clean_payload(&tm))
 }
 
 #[tauri::command]
@@ -317,6 +332,20 @@ pub async fn remove_tag(mgr: State<'_, Mgr>, id: u32) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub async fn update_tag(
+    mgr: State<'_, Mgr>,
+    id: u32,
+    name: String,
+    color: String,
+    auto_rule: Option<String>,
+) -> Result<(), String> {
+    mgr.get()
+        .map_err(|e| e.to_string())?
+        .update_tag(id, name, color, auto_rule);
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn get_global_download_path(mgr: State<'_, Mgr>) -> Result<Option<String>, String> {
     Ok(mgr
         .get()
@@ -332,6 +361,37 @@ pub async fn set_global_download_path(
     mgr.get()
         .map_err(|e| e.to_string())?
         .set_global_download_path(path);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn get_watch_folder(mgr: State<'_, Mgr>) -> Result<Option<String>, String> {
+    Ok(mgr.get().map_err(|e| e.to_string())?.get_watch_folder())
+}
+
+#[tauri::command]
+pub async fn set_watch_folder(mgr: State<'_, Mgr>, path: Option<String>) -> Result<(), String> {
+    // Normalize: empty string means "clear"
+    let path = path.map(|p| p.trim().to_string()).filter(|p| !p.is_empty());
+    if let Some(ref p) = path {
+        if !std::path::Path::new(p).is_dir() {
+            return Err(format!("Watch folder does not exist: {}", p));
+        }
+    }
+    mgr.get().map_err(|e| e.to_string())?.set_watch_folder(path);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn get_clipboard_monitor(mgr: State<'_, Mgr>) -> Result<bool, String> {
+    Ok(mgr.get().map_err(|e| e.to_string())?.get_clipboard_monitor())
+}
+
+#[tauri::command]
+pub async fn set_clipboard_monitor(mgr: State<'_, Mgr>, enabled: bool) -> Result<(), String> {
+    mgr.get()
+        .map_err(|e| e.to_string())?
+        .set_clipboard_monitor(enabled);
     Ok(())
 }
 
@@ -790,6 +850,26 @@ pub async fn set_torrent_utp(
     Ok(())
 }
 
+#[tauri::command]
+pub async fn get_torrent_super_seed(mgr: State<'_, Mgr>, id: u32) -> Result<Option<bool>, String> {
+    Ok(mgr
+        .get()
+        .map_err(|e| e.to_string())?
+        .get_torrent_super_seed(id))
+}
+
+#[tauri::command]
+pub async fn set_torrent_super_seed(
+    mgr: State<'_, Mgr>,
+    id: u32,
+    enabled: Option<bool>,
+) -> Result<(), String> {
+    mgr.get()
+        .map_err(|e| e.to_string())?
+        .set_torrent_super_seed(id, enabled);
+    Ok(())
+}
+
 // ── Blocklist ────────────────────────────────────────────────
 
 #[tauri::command]
@@ -930,12 +1010,7 @@ pub async fn export_torrents_to_file(
     format: String,
 ) -> Result<u32, String> {
     let tm = mgr.get().map_err(|e| e.to_string())?;
-    let payload = crate::build_clean_payload(
-        &tm.api,
-        &tm.forced_snapshot(),
-        Some(tm.session_start),
-        &tm.sequential_snapshot(),
-    );
+    let payload = crate::build_clean_payload(&tm);
     let torrents = payload["torrents"].as_array().cloned().unwrap_or_default();
 
     let count = torrents.len() as u32;
@@ -1132,12 +1207,7 @@ async fn import_torrents_csv_inner(
 #[tauri::command]
 pub async fn export_torrents_json(mgr: State<'_, Mgr>) -> Result<String, String> {
     let tm = mgr.get().map_err(|e| e.to_string())?;
-    let payload = crate::build_clean_payload(
-        &tm.api,
-        &tm.forced_snapshot(),
-        Some(tm.session_start),
-        &tm.sequential_snapshot(),
-    );
+    let payload = crate::build_clean_payload(&tm);
     let torrents = payload["torrents"].as_array().cloned().unwrap_or_default();
     let export: Vec<serde_json::Value> = torrents
         .iter()
@@ -1166,12 +1236,7 @@ pub async fn export_torrents_json(mgr: State<'_, Mgr>) -> Result<String, String>
 #[tauri::command]
 pub async fn export_torrents_csv(mgr: State<'_, Mgr>) -> Result<String, String> {
     let tm = mgr.get().map_err(|e| e.to_string())?;
-    let payload = crate::build_clean_payload(
-        &tm.api,
-        &tm.forced_snapshot(),
-        Some(tm.session_start),
-        &tm.sequential_snapshot(),
-    );
+    let payload = crate::build_clean_payload(&tm);
     let torrents = payload["torrents"].as_array().cloned().unwrap_or_default();
 
     let mut csv =

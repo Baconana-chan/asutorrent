@@ -12,6 +12,7 @@ import {
   setTorrentPex,
   setTorrentLpd,
   setTorrentEncryption,
+  setTorrentSuperSeed,
 } from "../hooks/useTorrents";
 
 export interface MenuItem {
@@ -21,6 +22,11 @@ export interface MenuItem {
   danger?: boolean;
   disabled?: boolean;
   separator?: boolean;
+  title?: string;
+  /** Optional colored dot rendered in place of the icon (e.g. for labels). */
+  dotColor?: string;
+  /** Optional checkmark shown at the end of the row (e.g. active labels). */
+  checked?: boolean;
   action: () => void;
 }
 
@@ -90,14 +96,20 @@ export function ContextMenu({ x, y, items, onClose }: Props) {
             key={item.id}
             class={`context-menu-item ${item.danger ? "danger" : ""}`}
             disabled={item.disabled}
+            title={item.title}
             onClick={() => {
               item.action();
               onClose();
             }}
             role="menuitem"
           >
-            <span class="context-menu-icon">{item.icon}</span>
+            {item.dotColor ? (
+              <span class="context-menu-dot" style={{ background: item.dotColor }} />
+            ) : (
+              <span class="context-menu-icon">{item.icon}</span>
+            )}
             <span class="context-menu-label">{item.label}</span>
+            {item.checked && <span class="context-menu-check">✓</span>}
           </button>
         )
       )}
@@ -120,6 +132,11 @@ export function buildTorrentMenu(
   torrentPexValues?: Map<number, boolean | null>,
   torrentLpdValues?: Map<number, boolean | null>,
   torrentEncryptionValues?: Map<number, string | null>,
+  torrentSuperSeedValues?: Map<number, boolean | null>,
+  labels?: { id: number; name: string; color: string }[],
+  labelState?: Map<number, Set<number>>,
+  onToggleLabels?: (ids: number[], tagId: number, apply: boolean) => void,
+  onClearLabels?: (ids: number[]) => void,
 ): MenuItem[] {
   const allPaused = states.every((s) => s === "paused");
   const allActive = states.every(
@@ -293,6 +310,56 @@ export function buildTorrentMenu(
           else next = null;
           feat.set(tid, next);
           onAction();
+        },
+      });
+    }
+
+    // Super-seed mode toggle (plain On/Off — there is no engine "default")
+    const ssOn = (torrentSuperSeedValues?.get(tid) ?? null) === true;
+    items.push({
+      id: "super-seed",
+      label: ssOn ? "Super-seed: ON" : "Super-seed: OFF",
+      icon: ssOn ? "🌱" : "🔻",
+      title:
+        "Send each piece to only one peer until it re-broadcasts it. Note: librqbit does not yet expose per-piece upload control, so the flag is stored and will be applied to the engine when support lands.",
+      action: () => {
+        setTorrentSuperSeed(tid, !ssOn);
+        onAction();
+      },
+    });
+  }
+
+  // ── Labels (colored tags) ──
+  if (labels && labels.length > 0 && onToggleLabels) {
+    items.push({
+      id: "sep-labels",
+      label: "",
+      icon: "",
+      separator: true,
+      action: () => {},
+    });
+    for (const label of labels) {
+      // Remove if every selected torrent already has the label, otherwise add
+      const allHave = ids.every((tid) => labelState?.get(tid)?.has(label.id));
+      items.push({
+        id: `label-${label.id}`,
+        label: label.name,
+        icon: "",
+        dotColor: label.color,
+        checked: allHave,
+        action: () => onToggleLabels(ids, label.id, !allHave),
+      });
+    }
+    // Clear all labels (only when at least one torrent has labels)
+    const anyHave = ids.some((tid) => (labelState?.get(tid)?.size ?? 0) > 0);
+    if (anyHave) {
+      items.push({
+        id: "clear-labels",
+        label: "Clear labels",
+        icon: "✕",
+        title: "Remove all labels from the selected torrents",
+        action: () => {
+          if (onClearLabels) onClearLabels(ids);
         },
       });
     }

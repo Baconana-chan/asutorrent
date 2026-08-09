@@ -1,6 +1,7 @@
 import type { TorrentListEntry } from "../hooks/useTorrents";
 import type { ColumnDef, ColumnKey } from "../hooks/useColumnConfig";
 import { fmtBytes, fmtSpeed, fmtETA } from "../utils/format";
+import { healthScoreColor, healthTitle } from "../utils/health";
 
 interface Props {
   torrent: TorrentListEntry;
@@ -74,6 +75,13 @@ function Cell({ torrent, col, search }: { torrent: TorrentListEntry; col: Column
                         : "var(--purple)",
             }}
           />
+          {torrent.health && (
+            <span
+              class="health-dot"
+              style={`background: ${healthScoreColor(torrent.health.score)}; --health-color: ${healthScoreColor(torrent.health.score)};`}
+              title={healthTitle(torrent.health)}
+            />
+          )}
           {torrent.forced && (
             <span class="forced-badge" title="Force resumed (exempt from queue)">
               ⚡
@@ -84,8 +92,46 @@ function Cell({ torrent, col, search }: { torrent: TorrentListEntry; col: Column
               🔢
             </span>
           )}
+          {torrent.super_seed && (
+            <span
+              class="super-seed-badge"
+              title="Super-seed mode (stored for future use — librqbit support pending)"
+            >
+              🌱
+            </span>
+          )}
           <span class="name-text">{highlightText(torrent.name || "Loading\u2026", search ?? "")}</span>
+          {torrent.tags.map((tag) => (
+            <span
+              key={tag.id}
+              class="row-tag-badge"
+              style={`--tag-color: ${tag.color};`}
+              title={`Label: ${tag.name}`}
+            >
+              {tag.name}
+            </span>
+          ))}
         </>
+      );
+
+    case "tags":
+      return (
+        <div class="tags-cell">
+          {torrent.tags.length === 0 ? (
+            <span class="tags-empty">—</span>
+          ) : (
+            torrent.tags.map((tag) => (
+              <span
+                key={tag.id}
+                class="row-tag-badge"
+                style={`--tag-color: ${tag.color};`}
+                title={`Label: ${tag.name}`}
+              >
+                {tag.name}
+              </span>
+            ))
+          )}
+        </div>
       );
 
     case "size":
@@ -139,6 +185,20 @@ function Cell({ torrent, col, search }: { torrent: TorrentListEntry; col: Column
 
     case "state":
       return <span class={`state-badge ${stateClass}`}>{stateLabel}</span>;
+
+    case "health": {
+      const h = torrent.health;
+      const score = Math.round(h?.score ?? 0);
+      const color = h ? healthScoreColor(h.score) : "var(--text-muted)";
+      return (
+        <div class="health-cell" title={healthTitle(h)}>
+          <div class="health-track">
+            <div class="health-fill" style={{ width: `${score}%`, background: color }} />
+          </div>
+          <span class="health-score" style={{ color }}>{h ? score : "—"}</span>
+        </div>
+      );
+    }
 
     default:
       return null;

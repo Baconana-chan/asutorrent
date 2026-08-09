@@ -11,11 +11,15 @@ export type ColumnKey =
   | "eta"
   | "peers"
   | "seeds"
-  | "state";
+  | "state"
+  | "health"
+  | "tags";
 
 export interface ColumnDef {
   key: ColumnKey;
   label: string;
+  /** Locale key for the column header (falls back to `label`) */
+  labelKey?: string;
   /** CSS `flex` value for the column cell */
   style: string;
   /** Extra inline styles (e.g., `justify-content: flex-end`) */
@@ -32,15 +36,17 @@ export interface ColumnEntry {
 // ── All columns definition ────────────────────────────────────
 
 export const ALL_COLUMNS: ColumnDef[] = [
-  { key: "name",           label: "Name",     style: "1 1 250px",                                         defaultVisible: true },
-  { key: "size",           label: "Size",     style: "0 0 85px",   extraStyle: "justify-content: flex-end;", defaultVisible: true },
-  { key: "progress",       label: "Progress", style: "1 1 150px",                                         defaultVisible: true },
-  { key: "download_speed", label: "Down",     style: "0 0 85px",   extraStyle: "justify-content: flex-end;", defaultVisible: true },
-  { key: "upload_speed",   label: "Up",       style: "0 0 85px",   extraStyle: "justify-content: flex-end;", defaultVisible: true },
-  { key: "eta",            label: "ETA",      style: "0 0 80px",   extraStyle: "justify-content: flex-end;", defaultVisible: true },
-  { key: "peers",          label: "Peers",    style: "0 0 70px",   extraStyle: "justify-content: center;",   defaultVisible: true },
-  { key: "seeds",          label: "Seeds",    style: "0 0 60px",   extraStyle: "justify-content: center;",   defaultVisible: false },
-  { key: "state",          label: "Status",   style: "0 0 80px",   extraStyle: "justify-content: center;",   defaultVisible: true },
+  { key: "name",           label: "Name",     labelKey: "col.name",     style: "1 1 250px",                                         defaultVisible: true },
+  { key: "size",           label: "Size",     labelKey: "col.size",     style: "0 0 85px",   extraStyle: "justify-content: flex-end;", defaultVisible: true },
+  { key: "progress",       label: "Progress", labelKey: "col.progress", style: "1 1 150px",                                         defaultVisible: true },
+  { key: "download_speed", label: "Down",     labelKey: "col.down",     style: "0 0 85px",   extraStyle: "justify-content: flex-end;", defaultVisible: true },
+  { key: "upload_speed",   label: "Up",       labelKey: "col.up",       style: "0 0 85px",   extraStyle: "justify-content: flex-end;", defaultVisible: true },
+  { key: "eta",            label: "ETA",      labelKey: "col.eta",      style: "0 0 80px",   extraStyle: "justify-content: flex-end;", defaultVisible: true },
+  { key: "peers",          label: "Peers",    labelKey: "col.peers",    style: "0 0 70px",   extraStyle: "justify-content: center;",   defaultVisible: true },
+  { key: "seeds",          label: "Seeds",    labelKey: "col.seeds",    style: "0 0 60px",   extraStyle: "justify-content: center;",   defaultVisible: false },
+  { key: "state",          label: "Status",   labelKey: "col.status",   style: "0 0 80px",   extraStyle: "justify-content: center;",   defaultVisible: true },
+  { key: "health",         label: "Health",   labelKey: "col.health",   style: "0 0 90px",   extraStyle: "justify-content: center;",   defaultVisible: false },
+  { key: "tags",           label: "Tags",     labelKey: "col.tags",     style: "1 1 120px",                                          defaultVisible: false },
 ];
 
 export const ALL_KEYS: ColumnKey[] = ALL_COLUMNS.map((c) => c.key);

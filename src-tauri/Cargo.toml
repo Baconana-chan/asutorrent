@@ -49,6 +49,7 @@ tokio-util = { version = "0.7", features = ["io"] }
 if-addrs = "0.12"
 async-trait = "0.1"
 urlencoding = "2"
+arboard = "3"
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.52"

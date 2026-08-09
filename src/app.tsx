@@ -24,11 +24,15 @@ import { MonitorDashboard } from "./components/MonitorDashboard";
 import { HistoryDialog } from "./components/HistoryDialog";
 import { VideoPlayer } from "./components/VideoPlayer";
 import { SetupDefaultClientDialog } from "./components/SetupDefaultClientDialog";
+import { WatchFolderDialog } from "./components/WatchFolderDialog";
 import { ProxyDialog } from "./components/ProxyDialog";
 import { BindAddressDialog } from "./components/BindAddressDialog";
 import { UtpDialog } from "./components/UtpDialog";
 import { NetworkFeaturesDialog } from "./components/NetworkFeaturesDialog";
 import { EncryptionDialog } from "./components/EncryptionDialog";
+import { ClipboardMagnetDialog } from "./components/ClipboardMagnetDialog";
+import { ClipboardMonitorDialog } from "./components/ClipboardMonitorDialog";
+import { TorrentPreviewDialog } from "./components/TorrentPreviewDialog";
 import { PortfolioDialog } from "./components/PortfolioDialog";
 import { CreateTorrentDialog } from "./components/CreateTorrentDialog";
 import { TorrentSearchDialog } from "./components/TorrentSearchDialog";
@@ -54,6 +58,8 @@ import {
   importTorrentsFromFile,
   isDefaultClientOffered,
   getPortfolios,
+  clipboardMagnet,
+  torrentPreviewQueue,
 } from "./hooks/useTorrents";
 
 function AppInner() {
@@ -86,10 +92,12 @@ function AppInner() {
   const showUtpDialog = useSignal(false);
   const showNetFeaturesDialog = useSignal(false);
   const showEncryptionDialog = useSignal(false);
+  const showClipboardDialog = useSignal(false);
   const showPortfolioDialog = useSignal(false);
   const showCreateTorrentDialog = useSignal(false);
   const showSearchDialog = useSignal(false);
   const showAboutDialog = useSignal(false);
+  const showWatchFolderDialog = useSignal(false);
 
   // Update state
   const updateInfo = useSignal<{ version: string; name: string; url: string; notes: string; current_version: string } | null>(null);
@@ -290,6 +298,7 @@ function AppInner() {
         onOpenSchedule={() => (showScheduleDialog.value = true)}
         onOpenCategories={() => (showCategoriesDialog.value = true)}
         onOpenAutoMgmt={handleOpenAutoMgmt}
+        onOpenWatchFolder={() => (showWatchFolderDialog.value = true)}
         onExportJson={() => handleExport("json")}
         onExportCsv={() => handleExport("csv")}
         onImport={handleImport}
@@ -298,6 +307,7 @@ function AppInner() {
         onOpenUtp={() => (showUtpDialog.value = true)}
         onOpenNetworkFeatures={() => (showNetFeaturesDialog.value = true)}
         onOpenEncryption={() => (showEncryptionDialog.value = true)}
+        onOpenClipboard={() => (showClipboardDialog.value = true)}
         onCreateTorrent={() => (showCreateTorrentDialog.value = true)}
         onOpenSearch={() => (showSearchDialog.value = true)}
         isDark={isDark.value}
@@ -414,6 +424,20 @@ function AppInner() {
         <EncryptionDialog onClose={() => (showEncryptionDialog.value = false)} />
       )}
 
+      {showClipboardDialog.value && (
+        <ClipboardMonitorDialog onClose={() => (showClipboardDialog.value = false)} />
+      )}
+
+      {clipboardMagnet.value && (
+        <ClipboardMagnetDialog
+          url={clipboardMagnet.value.url}
+          name={clipboardMagnet.value.name}
+          onClose={() => (clipboardMagnet.value = null)}
+        />
+      )}
+
+      {torrentPreviewQueue.value.length > 0 && <TorrentPreviewDialog />}
+
       {showNetFeaturesDialog.value && (
         <NetworkFeaturesDialog onClose={() => (showNetFeaturesDialog.value = false)} />
       )}
@@ -434,6 +458,10 @@ function AppInner() {
 
       {showAboutDialog.value && (
         <AboutDialog onClose={() => (showAboutDialog.value = false)} />
+      )}
+
+      {showWatchFolderDialog.value && (
+        <WatchFolderDialog onClose={() => (showWatchFolderDialog.value = false)} />
       )}
 
       {showUpdateDialog.value && updateInfo.value && (

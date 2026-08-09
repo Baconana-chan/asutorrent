@@ -99,8 +99,8 @@
 
 ### Новые фичи
 
-- [ ] 📂 **Watch Folder** — папка для авто-добавления .torrent файлов (как в qBitTorrent)
-- [ ] 🔄 **Super-seeding** — режим первой раздачи (каждый кусок отправляется только одному пиру)
+- [x] 📂 **Watch Folder** — папка для авто-добавления .torrent файлов (как в qBitTorrent)
+- [x] 🔄 **Super-seeding** — режим первой раздачи (каждый кусок отправляется только одному пиру)
 - [ ] 🎨 **Метки и цвета** — визуальная маркировка торрентов цветными ярлыками
 - [ ] 📏 **Per-torrent лимиты скорости** — индивидуальные DL/UL лимиты для каждого торрента
 - [ ] 📋 **Clipboard мониторинг** — авто-детект magnet-ссылок в буфере обмена
@@ -138,56 +138,14 @@
 
 ## 🌐 Localization
 
-### Real Languages (i18n) — Настоящие переводы
+Полный трекер локализаций вынесен в отдельный файл — там же таблица языков с оценкой **сложности вёрстки**:
 
-| Code | Language | Status | Translator |
-|------|----------|--------|------------|
-| en | English (base) | ✅ Complete | —
-| ru | Russian / Русский | ✅ Complete | —
-| de | German / Deutsch | ✅ Complete | —
-| fr | French / Français | ✅ Complete | —
-| es | Spanish / Español | ✅ Complete | —
-| zh | Chinese (Simplified) / 简体中文 | ✅ Complete | —
-| zh-tw | Chinese (Traditional) / 繁體中文 | ✅ Complete | —
-| ja | Japanese / 日本語 | ✅ Complete | —
-| ko | Korean / 한국어 | ✅ Complete | —
-| pl | Polish / Polski | ✅ Complete | —
-| uk | Ukrainian / Українська | ✅ Complete | —
-| it | Italian / Italiano | ⬜ Planned | —
-| pt | Portuguese / Português | ⬜ Planned | —
-| pt-br | Portuguese (Brazil) / Português (Brasil) | ⬜ Planned | —
-| ar | Arabic / العربية | ⬜ Planned | —
-| tr | Turkish / Türkçe | ⬜ Planned | —
-| nl | Dutch / Nederlands | ⬜ Planned | —
-| sv | Swedish / Svenska | ⬜ Planned | —
-| cs | Czech / Čeština | ⬜ Planned | —
-| ro | Romanian / Română | ⬜ Planned | —
-| vi | Vietnamese / Tiếng Việt | ⬜ Planned | —
-| th | Thai / ภาษาไทย | ⬜ Planned | —
-| he | Hebrew / עברית | ⬜ Planned | —
-| id | Indonesian / Bahasa Indonesia | ⬜ Planned | —
-| hu | Hungarian / Magyar | ⬜ Planned | —
-| fi | Finnish / Suomi | ⬜ Planned | —
-| da | Danish / Dansk | ⬜ Planned | —
+→ **TODO_LOCALES.md**
 
-### Fan / Novelty Languages — Фан-языки
-
-| Code | Name | Inspiration | Status |
-|------|------|-------------|--------|
-| en-pirate | Pirate ☠️ | Pirates of the Caribbean style | ✅ Complete |
-| en-anime | Anime English ✿ | Anime / Otaku / Japanese loanwords | ✅ Complete |
-| en-gb | British English 🇬🇧 | British spelling & terminology | ✅ Complete |
-| en-uwu | UwU | Cute / Kawaii / Furry speak | 💡 Idea |
-| en-old | Old English 🏰 | Shakespearean / Thou speak | 💡 Idea |
-| en-leet | 1337 | Leet / Hacker speak | 💡 Idea |
-| en-caveman | Caveman 🦴 | Caveman / Unga Bunga | 💡 Idea |
-| en-yoda | Yoda Speak 🌿 | Star Wars / Yoda grammar | 💡 Idea |
-| en-robot | Robot 🤖 | Robotic / Binary influenced | 💡 Idea |
-| en-valley | Valley Girl 💅 | 80s Valley Girl / Like, totally | 💡 Idea |
-| en-aussie | Straya 🦘 | Australian / Outback slang | 💡 Idea |
-| en-scot | Scottish 🏴󠁧󠁢󠁳󠁣󠁴󠁿 | Scottish dialect | 💡 Idea |
-| en-nyc | New York 🗽 | Brooklyn / New York accent | 💡 Idea |
-| ru-cyka | Русский Блатняк 🎸 | Russian criminal / blatnoy slang | 💡 Idea |
+Краткая сводка:
+- **187 позиций в трекере** — все **184 кода ISO 639-1** + 3 локальных варианта (en-gb, pt-br, zh-tw), с оценкой носителей и сложностью вёрстки: **19 готово** (388 ключей каждый) + 6 фан-языков = 25 файлов локали; 9 в плане, 159 идей.
+- **Вёрстка** (главный разделитель — направление письма и скрипт): 138 языков 🟢 Simple (LTR, как английский — добавляются без отладки UI); 12 🟡 (CJK, греческий, армянский…); 27 🟠 (тайский, индийские скрипты, эфиопский…); **10 🔴 RTL** (арабский, иврит, идиш, персидский, урду, пушту…) — требуют зеркальной вёрстки и проверки на реальном UI.
+- **Фан-языки**: 6 готовы (pirate, anime, uwu, caveman, old, nyc), **26 идей** (акценты: cockney, texan, canadian…; персонажи: doge, minion, shrek, klingon…; техно-мемы: leet, dad, soviet…; русскоязычные: ru-cyka, ru-padonki; островные: pitkern). Добавляются по одному — пачка стирает уникальность характера каждого.
 
 ---
 

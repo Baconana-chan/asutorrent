@@ -1,10 +1,15 @@
 import { useSignal, useComputed } from "@preact/signals";
 import { useEffect, useRef } from "preact/hooks";
 import {
-  torrents, TorrentListEntry, addMagnet, addTorrentFile,
-  getCategories, getFullConfig, getTorrentUtp,
+  torrents, TorrentListEntry, addMagnet,
+  torrentPreviewQueue,
+  getTorrentUtp,
   getTorrentDht, getTorrentPex, getTorrentLpd, getTorrentEncryption,
-  type CategoryPayload,
+  getTorrentSuperSeed,
+  refreshConfig,
+  tagDefs, torrentCategoryMap, torrentTagMap,
+  setTorrentTags,
+  type TagRef,
 } from "../hooks/useTorrents";
 import { TorrentRow } from "./TorrentRow";
 import { ContextMenu, buildTorrentMenu, MenuItem } from "./ContextMenu";
@@ -14,6 +19,7 @@ import {
   moveColumn, toggleColumn, resetColumns,
   type ColumnDef, type ColumnKey,
 } from "../hooks/useColumnConfig";
+import { t } from "../hooks/useLocales";
 
 interface Props {
   filter: string;
@@ -45,12 +51,6 @@ export function TorrentTable({ filter, search, onSelectionChange, onPlayFile }: 
   const deleteIds = useSignal<number[]>([]);
   const deleteNames = useSignal<string[]>([]);
 
-  // Category/Tag filter data
-  const categories = useSignal<CategoryPayload[]>([]);
-  const torrentCatMap = useSignal<Record<string, number>>({});
-  const torrentTagMap = useSignal<Record<string, number[]>>({});
-  const tagNameMap = useSignal<Record<number, string>>({});
-
   // Column picker state
   const showColumnPicker = useSignal(false);
   const pickerRef = useRef<HTMLDivElement>(null);
@@ -59,32 +59,26 @@ export function TorrentTable({ filter, search, onSelectionChange, onPlayFile }: 
   const dragColIdx = useSignal<number | null>(null);
   const dragOverColIdx = useSignal<number | null>(null);
 
+  // Load the shared category/label config once; refreshConfig() is also
+  // called by other components after category/label edits keep this in sync.
   useEffect(() => {
-    getCategories().then((c) => (categories.value = c)).catch(() => {});
-    getFullConfig().then((cfg) => {
-      torrentCatMap.value = cfg.torrent_categories as Record<string, number>;
-      torrentTagMap.value = cfg.torrent_tags as Record<string, number[]>;
-      // Build a reusable map: tag ID → tag name
-      const map: Record<number, string> = {};
-      for (const tag of (cfg.tags ?? [])) {
-        map[tag.id] = tag.name;
-      }
-      tagNameMap.value = map;
-    }).catch(() => {});
+    refreshConfig();
   }, []);
 
-  // Re-apply tag names whenever the torrent list updates
+  // When a brand-new torrent appears (the backend auto-assigns labels based
+  // on its name), reload the config so its colored labels show up at once.
+  const knownIds = useRef<Set<number>>(new Set());
   useEffect(() => {
-    const map = tagNameMap.value;
-    if (Object.keys(map).length === 0) return;
-    const tagMap = torrentTagMap.value;
-    const updated = torrents.value.map((t) => {
-      const tagIds = tagMap[String(t.id)] ?? [];
-      const names = tagIds.map((tid) => map[tid] ?? "").filter(Boolean);
-      return { ...t, tags: names };
-    });
-    torrents.value = updated;
-  }, [torrents.value, tagNameMap.value, torrentTagMap.value]);
+    const ids = new Set(torrents.value.map((t) => t.id));
+    let hasNew = false;
+    for (const id of ids) {
+      if (!knownIds.current.has(id)) { hasNew = true; break; }
+    }
+    if (hasNew) {
+      knownIds.current = ids;
+      refreshConfig();
+    }
+  }, [torrents.value]);
 
   // Close column picker on outside click
   useEffect(() => {
@@ -109,12 +103,27 @@ export function TorrentTable({ filter, search, onSelectionChange, onPlayFile }: 
       .map((e) => defByKey(e.key))
   );
 
+  // Decorate each torrent with its colored labels (pure derivation — the
+  // shared `torrents` signal itself stays untouched).
+  const decorated = useComputed<TorrentListEntry[]>(() => {
+    const defs = tagDefs.value;
+    const tagMap = torrentTagMap.value;
+    return torrents.value.map((t) => {
+      const tagIds = tagMap[String(t.id)] ?? [];
+      const tags: TagRef[] = tagIds
+        .map((tid) => defs.find((d) => d.id === tid))
+        .filter((d): d is NonNullable<typeof d> => !!d)
+        .map((d) => ({ id: d.id, name: d.name, color: d.color }));
+      return { ...t, tags };
+    });
+  });
+
   const filtered = useComputed(() => {
-    let list = torrents.value;
+    let list = decorated.value;
     if (filter !== "all") {
       if (filter.startsWith("cat:")) {
         const catId = Number(filter.slice(4));
-        const map = torrentCatMap.value;
+        const map = torrentCategoryMap.value;
         list = list.filter((t) => map[String(t.id)] === catId);
       } else if (filter.startsWith("tag:")) {
         const tagId = Number(filter.slice(4));
@@ -139,8 +148,8 @@ export function TorrentTable({ filter, search, onSelectionChange, onPlayFile }: 
         if (t.name?.toLowerCase().includes(q)) return true;
         // Search by info_hash
         if (t.info_hash.toLowerCase().includes(q)) return true;
-        // Search by tag names
-        if (t.tags.some((tag) => tag.toLowerCase().includes(q))) return true;
+        // Search by label names
+        if (t.tags.some((tag) => tag.name.toLowerCase().includes(q))) return true;
         return false;
       });
     }
@@ -182,6 +191,7 @@ export function TorrentTable({ filter, search, onSelectionChange, onPlayFile }: 
   const torrentPexValues = useSignal<Map<number, boolean | null>>(new Map());
   const torrentLpdValues = useSignal<Map<number, boolean | null>>(new Map());
   const torrentEncryptionValues = useSignal<Map<number, string | null>>(new Map());
+  const torrentSuperSeedValues = useSignal<Map<number, boolean | null>>(new Map());
 
   // ── Context menu ───────────────────────────────────────────────
   const handleContextMenu = async (e: MouseEvent, id: number) => {
@@ -199,26 +209,64 @@ export function TorrentTable({ filter, search, onSelectionChange, onPlayFile }: 
     const names = ids.map((tid) => torrents.value.find((t) => t.id === tid)?.name ?? "");
     const sequentialIds = new Set(torrents.value.filter((t) => t.sequential).map((t) => t.id));
 
+    // Current label assignments for the selected torrents (for menu checkmarks)
+    const labelState = new Map<number, Set<number>>();
+    for (const tid of ids) {
+      labelState.set(tid, new Set(torrentTagMap.value[String(tid)] ?? []));
+    }
+
     // Fetch network feature values for single selection
     if (ids.length === 1) {
       try {
-        const [utp, dht, pex, lpd, enc] = await Promise.all([
+        const [utp, dht, pex, lpd, enc, ss] = await Promise.all([
           getTorrentUtp(ids[0]),
           getTorrentDht(ids[0]),
           getTorrentPex(ids[0]),
           getTorrentLpd(ids[0]),
           getTorrentEncryption(ids[0]),
+          getTorrentSuperSeed(ids[0]),
         ]);
         torrentUtpValues.value = new Map([[ids[0], utp]]);
         torrentDhtValues.value = new Map([[ids[0], dht]]);
         torrentPexValues.value = new Map([[ids[0], pex]]);
         torrentLpdValues.value = new Map([[ids[0], lpd]]);
         torrentEncryptionValues.value = new Map([[ids[0], enc]]);
+        torrentSuperSeedValues.value = new Map([[ids[0], ss]]);
       } catch { /* ignore */ }
     }
 
-    ctxMenuItems.value = buildTorrentMenu(ids, states, forced, names, () => { ctxMenuPos.value = null; }, onPlayFile, sequentialIds, torrentUtpValues.value, torrentDhtValues.value, torrentPexValues.value, torrentLpdValues.value, torrentEncryptionValues.value);
+    ctxMenuItems.value = buildTorrentMenu(
+      ids, states, forced, names,
+      () => { ctxMenuPos.value = null; },
+      onPlayFile, sequentialIds,
+      torrentUtpValues.value, torrentDhtValues.value,
+      torrentPexValues.value, torrentLpdValues.value,
+      torrentEncryptionValues.value, torrentSuperSeedValues.value,
+      tagDefs.value, labelState, handleToggleLabels, handleClearLabels,
+    );
     ctxMenuPos.value = { x: e.clientX, y: e.clientY };
+  };
+
+  // Toggle a label on/off for the given torrents, then refresh shared config
+  const handleToggleLabels = async (ids: number[], tagId: number, apply: boolean) => {
+    try {
+      for (const tid of ids) {
+        const current = torrentTagMap.value[String(tid)] ?? [];
+        const next = apply
+          ? (current.includes(tagId) ? current : [...current, tagId])
+          : current.filter((t) => t !== tagId);
+        await setTorrentTags(tid, next);
+      }
+      await refreshConfig();
+    } catch (e) { console.error(e); }
+  };
+
+  // Remove every label from the given torrents
+  const handleClearLabels = async (ids: number[]) => {
+    try {
+      for (const tid of ids) await setTorrentTags(tid, []);
+      await refreshConfig();
+    } catch (e) { console.error(e); }
   };
 
   const handleDblClick = (_id: number) => {};
@@ -261,12 +309,17 @@ export function TorrentTable({ filter, search, onSelectionChange, onPlayFile }: 
       }
     }
     if (dt.files.length > 0) {
+      const torrentPaths: string[] = [];
       for (let i = 0; i < dt.files.length; i++) {
         const file = dt.files[i];
         const path = (file as unknown as { path?: string }).path;
         if (path && /\.torrent$/i.test(path)) {
-          try { await addTorrentFile(path); } catch { /* ignore */ }
+          torrentPaths.push(path);
         }
+      }
+      if (torrentPaths.length > 0) {
+        // Show the preview dialog so the user can pick files before adding.
+        torrentPreviewQueue.value = [...torrentPreviewQueue.value, ...torrentPaths];
       }
     }
   };
@@ -328,6 +381,9 @@ export function TorrentTable({ filter, search, onSelectionChange, onPlayFile }: 
   const hasItems = filtered.value.length > 0;
   const cols = visibleColumns.value;
 
+  // Localized column header (falls back to the raw English label).
+  const colName = (def: ColumnDef) => t(def.labelKey ?? "", def.label);
+
   return (
     <div
       class={`torrent-table-wrap ${dragOver.value ? "drag-over" : ""}`}
@@ -362,9 +418,9 @@ export function TorrentTable({ filter, search, onSelectionChange, onPlayFile }: 
             onDragLeave={handleColDragLeave}
             onDrop={(e) => handleColDrop(e, idx)}
             onDragEnd={handleColDragEnd}
-            title={`Sort by ${col.label}`}
+            title={t("table.sort_by", "Sort by {col}").replace("{col}", colName(col))}
           >
-            {col.label}
+            {colName(col)}
             <span class="sort-icon">{sortIcon(col.key)}</span>
           </div>
         ))}
@@ -374,7 +430,7 @@ export function TorrentTable({ filter, search, onSelectionChange, onPlayFile }: 
           <button
             class="col-picker-btn"
             onClick={(e) => { e.stopPropagation(); showColumnPicker.value = !showColumnPicker.value; }}
-            title="Customize columns"
+            title={t("table.customize_columns", "Customize columns")}
           >
             <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
               <line x1="3" y1="4" x2="13" y2="4" />
@@ -387,9 +443,9 @@ export function TorrentTable({ filter, search, onSelectionChange, onPlayFile }: 
           {showColumnPicker.value && (
             <div class="col-picker-dropdown" ref={pickerRef} onClick={(e) => e.stopPropagation()}>
               <div class="col-picker-header">
-                <span>Columns</span>
-                <button class="col-picker-reset-btn" onClick={resetColumns} title="Reset to defaults">
-                  Reset
+                <span>{t("table.columns", "Columns")}</span>
+                <button class="col-picker-reset-btn" onClick={resetColumns} title={t("table.reset_defaults", "Reset to defaults")}>
+                  {t("table.reset", "Reset")}
                 </button>
               </div>
               {columnConfig.value.map((entry, idx) => {
@@ -422,13 +478,13 @@ export function TorrentTable({ filter, search, onSelectionChange, onPlayFile }: 
                       }
                     }}
                   >
-                    <span class="col-picker-drag-handle" title="Drag to reorder">⠿</span>
+                    <span class="col-picker-drag-handle" title={t("table.drag_reorder", "Drag to reorder")}>⠿</span>
                     <input
                       type="checkbox"
                       checked={entry.visible}
                       onChange={() => toggleColumn(entry.key)}
                     />
-                    <span class="col-picker-label">{def.label}</span>
+                    <span class="col-picker-label">{colName(def)}</span>
                   </label>
                 );
               })}
@@ -501,6 +557,12 @@ function compare(a: TorrentListEntry, b: TorrentListEntry, key: SortKey): number
     case "state": return (a.state ?? "").localeCompare(b.state ?? "");
     case "peers": return a.peers - b.peers;
     case "seeds": return a.seeds - b.seeds;
+    case "health": return (a.health?.score ?? -1) - (b.health?.score ?? -1);
+    case "tags": {
+      const aTag = a.tags[0]?.name ?? "";
+      const bTag = b.tags[0]?.name ?? "";
+      return aTag.localeCompare(bTag);
+    }
     default: return 0;
   }
 }

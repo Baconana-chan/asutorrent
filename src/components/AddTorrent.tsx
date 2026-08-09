@@ -1,6 +1,6 @@
 import { useSignal } from "@preact/signals";
 import { t } from "../hooks/useLocales";
-import { addMagnet, addTorrentFile, addHttpDownload } from "../hooks/useTorrents";
+import { addMagnet, addHttpDownload, torrentPreviewQueue } from "../hooks/useTorrents";
 import { open } from "@tauri-apps/plugin-dialog";
 
 interface Props {
@@ -74,7 +74,8 @@ export function AddTorrentModal({ onClose }: Props) {
 
     try {
       if (detected === "torrent-file") {
-        await addTorrentFile(resolved);
+        // Open the file-preview dialog instead of adding blindly.
+        torrentPreviewQueue.value = [resolved];
       } else if (detected === "http-download") {
         await addHttpDownload(resolved);
       } else {
@@ -95,16 +96,9 @@ export function AddTorrentModal({ onClose }: Props) {
         filters: [{ name: "Torrent", extensions: ["torrent"] }],
       });
       if (result) {
-        adding.value = true;
-        error.value = null;
-        try {
-          await addTorrentFile(result);
-          onClose();
-        } catch (e) {
-          error.value = String(e);
-        } finally {
-          adding.value = false;
-        }
+        // Open the file-preview dialog so the user can pick which files to add.
+        torrentPreviewQueue.value = [result];
+        onClose();
       }
     } catch { /* cancelled */ }
   };

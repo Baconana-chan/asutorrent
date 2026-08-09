@@ -10,7 +10,8 @@
     "tauri": "tauri",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:rust": "cd src-tauri && cargo test"
+    "test:rust": "cd src-tauri && cargo test",
+    "check:locales": "node scripts/check-locales.mjs"
   },
   "dependencies": {
     "@preact/signals": "^2.0.0",

@@ -275,12 +275,7 @@ async fn torrents_info(
     Query(query): Query<TorrentInfoQuery>,
 ) -> impl IntoResponse {
     /* unchanged — existing handler */
-    let payload = build_clean_payload(
-        &state.tm.api,
-        &state.tm.forced_snapshot(),
-        Some(state.tm.session_start),
-        &state.tm.sequential_snapshot(),
-    );
+    let payload = build_clean_payload(&state.tm);
     let mut torrents: Vec<Value> = payload["torrents"].as_array().cloned().unwrap_or_default();
 
     if let Some(ref filter) = query.filter {
@@ -335,12 +330,7 @@ async fn torrents_info(
             });
         }
     }
-    let payload = build_clean_payload(
-        &state.tm.api,
-        &state.tm.forced_snapshot(),
-        Some(state.tm.session_start),
-        &state.tm.sequential_snapshot(),
-    );
+    let payload = build_clean_payload(&state.tm);
     let torrents = payload["torrents"].as_array().cloned().unwrap_or_default();
 
     let qbt_torrents: Vec<Value> = torrents
@@ -544,12 +534,7 @@ async fn torrents_properties(
     AxumState(state): AxumState<AppState>,
     Query(query): Query<TorrentPropsQuery>,
 ) -> impl IntoResponse {
-    let payload = build_clean_payload(
-        &state.tm.api,
-        &state.tm.forced_snapshot(),
-        Some(state.tm.session_start),
-        &state.tm.sequential_snapshot(),
-    );
+    let payload = build_clean_payload(&state.tm);
     let torrents = payload["torrents"].as_array().cloned().unwrap_or_default();
     let t = torrents.iter().find(|t| {
         t["info_hash"]
@@ -641,15 +626,9 @@ async fn set_preferences(
 async fn metrics_handler(AxumState(state): AxumState<AppState>) -> impl IntoResponse {
     use core::fmt::Write;
     let mut output = String::new();
-    let forced = state.tm.forced_snapshot();
 
     // Get the payload that the frontend already uses — this gives us all stats
-    let payload = build_clean_payload(
-        &state.tm.api,
-        &forced,
-        Some(state.tm.session_start),
-        &state.tm.sequential_snapshot(),
-    );
+    let payload = build_clean_payload(&state.tm);
     let torrents = payload["torrents"].as_array().cloned().unwrap_or_default();
     let stats = &payload["stats"];
 
@@ -1025,13 +1004,7 @@ async fn peers_countries(AxumState(state): AxumState<AppState>) -> impl IntoResp
 /// Return geo-distribution of all peers across all torrents.
 /// This uses the peer counts we already track in the stats payload.
 async fn peers_geo(AxumState(state): AxumState<AppState>) -> impl IntoResponse {
-    let forced = state.tm.forced_snapshot();
-    let payload = build_clean_payload(
-        &state.tm.api,
-        &forced,
-        Some(state.tm.session_start),
-        &state.tm.sequential_snapshot(),
-    );
+    let payload = build_clean_payload(&state.tm);
     let torrents = payload["torrents"].as_array().cloned().unwrap_or_default();
 
     // Build per-torrent peer list (total counts, not per-IP since we use the JSON payload)
@@ -1063,12 +1036,7 @@ async fn peers_geo(AxumState(state): AxumState<AppState>) -> impl IntoResponse {
 // ── Helper: resolve hashes ───────────────────────────────────────
 
 fn resolve_hashes(state: &AppState, hashes: &str) -> Vec<u32> {
-    let payload = build_clean_payload(
-        &state.tm.api,
-        &state.tm.forced_snapshot(),
-        Some(state.tm.session_start),
-        &state.tm.sequential_snapshot(),
-    );
+    let payload = build_clean_payload(&state.tm);
     let torrents = payload["torrents"].as_array().cloned().unwrap_or_default();
 
     if hashes == "all" {

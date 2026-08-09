@@ -110,6 +110,108 @@
   margin-top: 16px;
 }
 
+/* ── Torrent file preview (before add) ────────────────────────── */
+.preview-modal {
+  width: 660px;
+  max-width: 92vw;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.preview-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.preview-title {
+  font-size: 15px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+.preview-counter {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--text-muted);
+  background: var(--bg-btn-hover);
+  border-radius: 10px;
+  padding: 2px 8px;
+}
+.preview-loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-muted);
+  font-size: 13px;
+  padding: 24px 0;
+  justify-content: center;
+}
+.preview-error p {
+  color: var(--red);
+  font-size: 13px;
+  margin: 8px 0;
+}
+.preview-info {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--bg-input) 40%, transparent);
+}
+.preview-info-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 90px;
+}
+.preview-info-label {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--text-muted);
+}
+.preview-info-value {
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.preview-hash {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--text-secondary);
+}
+.preview-comment {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin: 0;
+  line-height: 1.4;
+  max-height: 42px;
+  overflow: hidden;
+}
+.preview-files {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow-y: auto;
+  max-height: 45vh;
+  min-height: 120px;
+  background: var(--bg-table);
+  padding: 4px 0;
+}
+.preview-files-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+
 /* ── Generic button (used in modals / buttons outside toolbar) ── */
 .btn {
   display: inline-flex; align-items: center; justify-content: center;
@@ -548,6 +650,32 @@
   padding: 2px 8px;
   border-radius: 10px;
   font-weight: 500;
+  border: 1px solid;
+}
+
+.tag-color-input {
+  width: 34px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg-input);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.tag-color-input::-webkit-color-swatch-wrapper {
+  padding: 2px;
+}
+.tag-color-input::-webkit-color-swatch {
+  border: none;
+  border-radius: 3px;
+}
+
+.tag-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
 }
 
 /* Path tab */
@@ -1557,6 +1685,81 @@
   border: 1px solid rgba(234, 179, 8, 0.2);
 }
 
+/* ── Watch Folder Dialog ──────────────────────────────────────── */
+.watch-dialog {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 1001;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg, 12px);
+  width: 460px;
+  max-width: 90%;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  animation: dialogFadeIn 0.3s var(--ease-out);
+}
+
+.watch-dialog-body {
+  padding: 20px 24px 24px;
+}
+
+.watch-dialog-hint {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  margin: 0 0 16px 0;
+}
+
+.watch-dialog-hint code {
+  background: rgba(127, 127, 127, 0.12);
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.watch-dialog-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--accent, #34d35e);
+  margin: 10px 0 0 0;
+}
+
+.watch-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent, #34d35e);
+  box-shadow: 0 0 8px var(--accent, #34d35e);
+  animation: watchPulse 2s var(--ease-out) infinite;
+}
+
+@keyframes watchPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+.watch-dialog-note {
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.5;
+  margin: 12px 0 0 0;
+  padding: 8px 10px;
+  background: rgba(127, 127, 127, 0.08);
+  border-radius: 6px;
+  border: 1px solid rgba(127, 127, 127, 0.15);
+}
+
+.watch-dialog-note code {
+  background: rgba(127, 127, 127, 0.12);
+  padding: 0 4px;
+  border-radius: 3px;
+  font-size: 10px;
+}
+
 /* ── uTP Dialog ───────────────────────────────────────────────── */
 .utp-dialog {
   max-width: 480px;
@@ -1878,6 +2081,88 @@
 }
 
 .enc-saved {
+  font-size: 12px;
+  color: var(--green);
+  margin-right: auto;
+}
+
+/* ── Clipboard Dialogs ────────────────────────────────────────── */
+.clipboard-dialog {
+  min-width: 420px;
+  max-width: 560px;
+}
+.clipboard-dialog-icon {
+  font-size: 20px;
+  margin-right: 8px;
+}
+.clipboard-dialog-text {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  margin: 0 0 12px 0;
+}
+.clipboard-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  padding: 8px 10px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin-bottom: 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.clipboard-url {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+  background: var(--bg-app);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  word-break: break-all;
+  max-height: 90px;
+  overflow-y: auto;
+  user-select: text;
+}
+
+.clipboard-monitor-dialog {
+  max-width: 460px;
+}
+.clipboard-toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--text);
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-secondary);
+  cursor: pointer;
+  transition: border-color var(--duration-fast) var(--ease-out);
+}
+.clipboard-toggle-row:hover {
+  border-color: var(--accent);
+}
+.clipboard-note {
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.5;
+  padding: 8px 10px;
+  margin-top: 10px;
+  background: color-mix(in srgb, var(--yellow) 10%, transparent);
+  border-left: 2px solid var(--yellow);
+  border-radius: 4px;
+}
+.clipboard-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.clipboard-saved {
   font-size: 12px;
   color: var(--green);
   margin-right: auto;

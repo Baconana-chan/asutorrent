@@ -2,8 +2,8 @@ import { useSignal } from "@preact/signals";
 import { useEffect } from "preact/hooks";
 import {
   getCategories, addCategory, removeCategory, updateCategory,
-  getTags, addTag, removeTag,
-  getGlobalDownloadPath, setGlobalDownloadPath,
+  getTags, addTag, removeTag, updateTag,
+  getGlobalDownloadPath, setGlobalDownloadPath, refreshConfig,
   type CategoryPayload, type TagPayload,
 } from "../hooks/useTorrents";
 
@@ -36,8 +36,11 @@ export function CategoriesDialog({ onClose }: Props) {
   const editCatPath = useSignal("");
   const editCatRule = useSignal("");
 
-  // Tag editing signals (reserved for future use)
-  // const editingTag = useSignal<number | null>(null);
+  // Tag editing state
+  const editingTag = useSignal<number | null>(null);
+  const editTagName = useSignal("");
+  const editTagColor = useSignal("#34d35e");
+  const editTagRule = useSignal("");
 
   const loading = useSignal(true);
 
@@ -70,6 +73,7 @@ export function CategoriesDialog({ onClose }: Props) {
       newCatIcon.value = "\u{1F4C1}";
       newCatPath.value = "";
       newCatRule.value = "";
+      refreshConfig();
     } catch (e) { console.error(e); }
   };
 
@@ -77,6 +81,7 @@ export function CategoriesDialog({ onClose }: Props) {
     try {
       await removeCategory(id);
       categories.value = categories.value.filter((c) => c.id !== id);
+      refreshConfig();
     } catch (e) { console.error(e); }
   };
 
@@ -100,6 +105,7 @@ export function CategoriesDialog({ onClose }: Props) {
           : c
       );
       editingCat.value = null;
+      refreshConfig();
     } catch (e) { console.error(e); }
   };
 
@@ -111,6 +117,7 @@ export function CategoriesDialog({ onClose }: Props) {
       newTagName.value = "";
       newTagColor.value = "#34d35e";
       newTagRule.value = "";
+      refreshConfig();
     } catch (e) { console.error(e); }
   };
 
@@ -118,10 +125,32 @@ export function CategoriesDialog({ onClose }: Props) {
     try {
       await removeTag(id);
       tags.value = tags.value.filter((t) => t.id !== id);
+      refreshConfig();
     } catch (e) { console.error(e); }
   };
 
-  // Tag editing via inline edit is not implemented in this version
+  const startEditTag = (tag: TagPayload) => {
+    editingTag.value = tag.id;
+    editTagName.value = tag.name;
+    editTagColor.value = tag.color;
+    editTagRule.value = tag.auto_rule || "";
+  };
+
+  const saveEditTag = async () => {
+    if (editingTag.value === null) return;
+    try {
+      await updateTag(editingTag.value, editTagName.value.trim(), editTagColor.value,
+        editTagRule.value.trim() || null);
+      tags.value = tags.value.map((t) =>
+        t.id === editingTag.value
+          ? { ...t, name: editTagName.value.trim(), color: editTagColor.value,
+              auto_rule: editTagRule.value.trim() || null }
+          : t
+      );
+      editingTag.value = null;
+      refreshConfig();
+    } catch (e) { console.error(e); }
+  };
 
   const handleSetGlobalPath = async (path: string | null) => {
     try {
@@ -237,26 +266,55 @@ export function CategoriesDialog({ onClose }: Props) {
               )}
               {tags.value.map((tag) => (
                 <div key={tag.id} class="tag-item">
-                  <span class="tag-badge" style={`background: ${tag.color}22; color: ${tag.color}; border-color: ${tag.color}44;`}>
-                    {tag.name}
-                  </span>
-                  {tag.auto_rule && <span class="tag-rule">{tag.auto_rule}</span>}
-                  <div class="cat-actions">
-                    <button class="btn-icon danger" title="Remove" onClick={() => handleRemoveTag(tag.id)}>
-                      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 4l8 8M12 4l-8 8"/></svg>
-                    </button>
-                  </div>
+                  {editingTag.value === tag.id ? (
+                    <div class="tag-edit">
+                      <div class="cat-edit-row">
+                        <input type="color" class="tag-color-input" value={editTagColor.value}
+                          onInput={(e) => (editTagColor.value = (e.target as HTMLInputElement).value)} />
+                        <input class="modal-input cat-name-input" value={editTagName.value}
+                          onInput={(e) => (editTagName.value = (e.target as HTMLInputElement).value)} />
+                        <span class="tag-preview" style={`background: ${editTagColor.value}22; color: ${editTagColor.value}; border-color: ${editTagColor.value}44;`}>
+                          {editTagName.value || "Preview"}
+                        </span>
+                      </div>
+                      <div class="cat-edit-row">
+                        <span class="cat-edit-label">Auto rule:</span>
+                        <input class="modal-input cat-rule-input" value={editTagRule.value}
+                          placeholder="regex" onInput={(e) => (editTagRule.value = (e.target as HTMLInputElement).value)} />
+                      </div>
+                      <div class="cat-edit-actions">
+                        <button class="btn btn-primary btn-sm" onClick={saveEditTag}>Save</button>
+                        <button class="btn btn-ghost btn-sm" onClick={() => (editingTag.value = null)}>Cancel</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <span class="tag-badge" style={`background: ${tag.color}22; color: ${tag.color}; border-color: ${tag.color}44;`}>
+                        {tag.name}
+                      </span>
+                      {tag.auto_rule && <span class="tag-rule">{tag.auto_rule}</span>}
+                      <div class="cat-actions">
+                        <button class="btn-icon" title="Edit" onClick={() => startEditTag(tag)}>
+                          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M11 2l3 3-8 8H3v-3l8-8z"/></svg>
+                        </button>
+                        <button class="btn-icon danger" title="Remove" onClick={() => handleRemoveTag(tag.id)}>
+                          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 4l8 8M12 4l-8 8"/></svg>
+                        </button>
+                      </div>
+                    </>
+                  )}
                 </div>
               ))}
 
               {/* Add new tag form */}
               <div class="category-add">
                 <div class="cat-edit-row">
+                  <span class="cat-edit-label">Color:</span>
+                  <input type="color" class="tag-color-input" value={newTagColor.value}
+                    onInput={(e) => (newTagColor.value = (e.target as HTMLInputElement).value)} />
                   <input class="modal-input cat-name-input" value={newTagName.value}
                     placeholder="Tag name" onInput={(e) => (newTagName.value = (e.target as HTMLInputElement).value)} />
-                  <input class="modal-input cat-rule-input" value={newTagColor.value}
-                    placeholder="color hex" style="width: 80px;" onInput={(e) => (newTagColor.value = (e.target as HTMLInputElement).value)} />
-                  <span class="tag-preview" style={`background: ${newTagColor.value}22; color: ${newTagColor.value};`}>
+                  <span class="tag-preview" style={`background: ${newTagColor.value}22; color: ${newTagColor.value}; border-color: ${newTagColor.value}44;`}>
                     {newTagName.value || "Preview"}
                   </span>
                 </div>

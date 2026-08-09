@@ -69,6 +69,9 @@ pub struct AppConfig {
     pub torrent_categories: std::collections::HashMap<u32, u32>,
     /// Per-torrent tags: torrent_id → Vec<tag_id>
     pub torrent_tags: std::collections::HashMap<u32, Vec<u32>>,
+    /// When each torrent was first added to this client: info_hash → Unix secs.
+    #[serde(default)]
+    pub torrent_added_at: std::collections::HashMap<String, u64>,
     #[serde(default)]
     pub auto_management: AutoManagementConfig,
     pub next_category_id: u32,
@@ -112,12 +115,27 @@ pub struct AppConfig {
     /// Per-torrent encryption overrides: torrent_id → mode ("forced" | "enabled" | "disabled")
     #[serde(default)]
     pub per_torrent_encryption: std::collections::HashMap<u32, String>,
+    /// Per-torrent super-seed mode: torrent_id → enabled.
+    /// Note: librqbit doesn't yet expose per-piece upload control, so this is
+    /// stored/applied for when the engine supports it.
+    #[serde(default)]
+    pub per_torrent_super_seed: std::collections::HashMap<u32, bool>,
     /// Named filter presets (portfolios).
     #[serde(default)]
     pub portfolios: Vec<Portfolio>,
     /// Blocklist URL for blocking known bad IPs (e.g. https://example.com/blocklist.txt).
     #[serde(default)]
     pub blocklist_url: Option<String>,
+    /// Watch folder — .torrent files dropped here are auto-added (like qBittorrent).
+    #[serde(default)]
+    pub watch_folder: Option<String>,
+    /// Clipboard monitoring — detect magnet links copied to the clipboard.
+    #[serde(default = "default_clipboard_monitor")]
+    pub clipboard_monitor: bool,
+}
+
+fn default_clipboard_monitor() -> bool {
+    true
 }
 
 impl Default for AppConfig {
@@ -183,6 +201,7 @@ impl Default for AppConfig {
             ],
             torrent_categories: std::collections::HashMap::new(),
             torrent_tags: std::collections::HashMap::new(),
+            torrent_added_at: std::collections::HashMap::new(),
             auto_management: AutoManagementConfig::default(),
             next_category_id: 6,
             next_tag_id: 4,
@@ -199,6 +218,7 @@ impl Default for AppConfig {
             per_torrent_lpd: std::collections::HashMap::new(),
             encryption_mode: "enabled".to_string(),
             per_torrent_encryption: std::collections::HashMap::new(),
+            per_torrent_super_seed: std::collections::HashMap::new(),
             portfolios: vec![
                 Portfolio {
                     id: 1,
@@ -214,6 +234,8 @@ impl Default for AppConfig {
                 },
             ],
             blocklist_url: None,
+            watch_folder: None,
+            clipboard_monitor: true,
         }
     }
 }

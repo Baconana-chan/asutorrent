@@ -10,7 +10,8 @@ vi.mock("@preact/signals", () => ({
 }));
 
 // Now import the module after mocking
-import { t, LOCALES } from "../hooks/useLocales";
+import { t, LOCALES, locale } from "../hooks/useLocales";
+import { data as ruData } from "../locales/ru";
 
 describe("useLocales", () => {
   beforeEach(() => {
@@ -27,6 +28,24 @@ describe("useLocales", () => {
     expect(result).toBe("Fallback Text");
   });
 
+  it("falls back to English when a key is missing from the active locale", () => {
+    const prev = locale.value;
+    locale.value = "ru";
+    try {
+      // Simulate an unfinished translation: temporarily drop one Russian key.
+      const key = "status.dht";
+      const saved = ruData[key];
+      delete ruData[key];
+      try {
+        expect(t(key)).toBe("DHT"); // English value, not the raw key
+      } finally {
+        ruData[key] = saved;
+      }
+    } finally {
+      locale.value = prev;
+    }
+  });
+
   it("returns English translation for known keys", () => {
     expect(t("toolbar.add")).toBe("Add");
     expect(t("about.title")).toBe("About AsuTorrent");
@@ -38,16 +57,28 @@ describe("useLocales", () => {
     expect(codes).toContain("en");
     expect(codes).toContain("ru");
     expect(codes).toContain("de");
+    expect(codes).toContain("da");
     expect(codes).toContain("fr");
+    expect(codes).toContain("it");
     expect(codes).toContain("es");
+    expect(codes).toContain("id");
     expect(codes).toContain("zh");
     expect(codes).toContain("zh-tw");
     expect(codes).toContain("ja");
     expect(codes).toContain("ko");
     expect(codes).toContain("pl");
+    expect(codes).toContain("sv");
+    expect(codes).toContain("nl");
+    expect(codes).toContain("pt");
+    expect(codes).toContain("pt-br");
     expect(codes).toContain("uk");
     expect(codes).toContain("en-pirate");
-    expect(LOCALES.length).toBeGreaterThanOrEqual(12);
+    expect(codes).toContain("en-uwu");
+    expect(codes).toContain("en-caveman");
+    expect(codes).toContain("en-old");
+    expect(codes).toContain("en-nyc");
+    expect(codes).toContain("en-texan");
+    expect(LOCALES.length).toBeGreaterThanOrEqual(25);
   });
 
   it("each locale has a name and native name", () => {

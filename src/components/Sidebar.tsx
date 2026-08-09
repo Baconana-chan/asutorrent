@@ -1,8 +1,9 @@
 import { useSignal } from "@preact/signals";
 import { useEffect } from "preact/hooks";
 import { t } from "../hooks/useLocales";
-import { torrents, rssFeeds, getCategories, getTags, getPortfolios } from "../hooks/useTorrents";
-import type { CategoryPayload, TagPayload, PortfolioPayload } from "../hooks/useTorrents";
+import { torrents, rssFeeds, getPortfolios, refreshConfig } from "../hooks/useTorrents";
+import { categoriesDefs, tagDefs } from "../hooks/useTorrents";
+import type { PortfolioPayload } from "../hooks/useTorrents";
 
 interface Props {
   filter: string;
@@ -17,13 +18,11 @@ interface Props {
 export function Sidebar({ filter, onFilterChange, onOpenRss, onOpenCategories, onOpenMonitor, onOpenHistory, onOpenPortfolios }: Props) {
   const list = Array.isArray(torrents.value) ? torrents.value : [];
 
-  const categories = useSignal<CategoryPayload[]>([]);
-  const tags = useSignal<TagPayload[]>([]);
   const portfolios = useSignal<PortfolioPayload[]>([]);
 
   useEffect(() => {
-    getCategories().then((c) => (categories.value = c)).catch(() => {});
-    getTags().then((t) => (tags.value = t)).catch(() => {});
+    // Shared category/label defs stay in sync via refreshConfig()
+    refreshConfig();
     getPortfolios().then((p) => (portfolios.value = p)).catch(() => {});
   }, []);
 
@@ -137,7 +136,7 @@ export function Sidebar({ filter, onFilterChange, onOpenRss, onOpenCategories, o
 
       <div class="sidebar-section">
         <div class="sidebar-section-title">{t("sidebar.categories")}</div>
-        {categories.value.map((cat) => (
+        {categoriesDefs.value.map((cat) => (
           <div
             key={cat.id}
             class={`sidebar-item ${filter === `cat:${cat.id}` ? "active" : ""}`}
@@ -157,7 +156,7 @@ export function Sidebar({ filter, onFilterChange, onOpenRss, onOpenCategories, o
 
       <div class="sidebar-section">
         <div class="sidebar-section-title">{t("sidebar.tags")}</div>
-        {tags.value.map((tag) => (
+        {tagDefs.value.map((tag) => (
           <div
             key={tag.id}
             class={`sidebar-item ${filter === `tag:${tag.id}` ? "active" : ""}`}

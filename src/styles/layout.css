@@ -196,3 +196,11 @@
   50% { opacity: 1; transform: scale(1.15); }
 }
 
+/* ── Sequential & super-seed badges ────────────────────────────── */
+.sequential-badge,
+.super-seed-badge {
+  font-size: 11px;
+  flex-shrink: 0;
+  cursor: help;
+}
+

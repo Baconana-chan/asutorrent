@@ -3,12 +3,15 @@ use anyhow::{Context, Result};
 use chrono::{Local, Timelike};
 use librqbit::api::{Api, ApiTorrentListOpts, TorrentDetailsResponse, TorrentIdOrHash};
 use librqbit::limits::LimitsConfig;
-use librqbit::{AddTorrent, AddTorrentOptions, ManagedTorrent, Session, SessionOptions};
+use librqbit::{
+    AddTorrent, AddTorrentOptions, ManagedTorrent, Session, SessionOptions,
+    SessionPersistenceConfig,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::num::NonZeroU32;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
 
 // ── Speed History ────────────────────────────────────────────────
@@ -281,8 +284,14 @@ pub struct TorrentManager {
     /// Join handles for active HTTP download tasks (so cancel can abort).
     http_download_tasks: Mutex<HashMap<u32, crate::JoinHandle>>,
     next_http_id: Mutex<u32>,
+    /// Watch folder files that recently failed to add (path → when), so broken
+    /// or duplicate files aren't retried/logged on every scan.
+    watch_failed: Mutex<HashMap<PathBuf, std::time::Instant>>,
     /// Per-torrent state machine tracking (id → state).
     pub torrent_states: Mutex<HashMap<u32, TorrentState>>,
+    /// Estimated seed sources per torrent (id → count of live peers that have
+    /// fed us at least one verified piece). Refreshed by `update_seed_sources`.
+    pub seed_sources: Mutex<HashMap<u32, u32>>,
 }
 
 // ── HTTP/FTP Download Tracking ───────────────────────────────────
@@ -330,6 +339,12 @@ impl TorrentManager {
             socks_proxy_url: cfg.socks5_proxy_url.clone(),
             disable_dht: cfg.global_disable_dht,
             fastresume: true,
+            // Persist the torrent list + fast-resume state to disk so torrents
+            // survive restarts. Note: `fastresume` alone is NOT enough — librqbit
+            // only creates a persistence store when `persistence` is set.
+            persistence: Some(SessionPersistenceConfig::Json {
+                folder: Some(data_dir.join("session")),
+            }),
             blocklist_url: cfg.blocklist_url.clone(),
             ..Default::default()
         };
@@ -359,7 +374,9 @@ impl TorrentManager {
             http_downloads: Mutex::new(HashMap::new()),
             http_download_tasks: Mutex::new(HashMap::new()),
             next_http_id: Mutex::new(1),
+            watch_failed: Mutex::new(HashMap::new()),
             torrent_states: Mutex::new(HashMap::new()),
+            seed_sources: Mutex::new(HashMap::new()),
         })
     }
 
@@ -448,6 +465,88 @@ impl TorrentManager {
         self.enforce_queue().await;
         self.try_auto_assign(id);
         Ok(id)
+    }
+
+    /// Add a .torrent file restricted to exactly the given file indices
+    /// (used by the preview dialog). An empty selection legitimately means
+    /// "download nothing" — the caller always supplies the full list when
+    /// nothing was deselected, so `update_only_files` is applied unconditionally.
+    pub async fn add_torrent_file_selected(
+        &self,
+        path: &str,
+        selected: Vec<usize>,
+    ) -> Result<u32> {
+        let id = self.add_torrent_file(path).await?;
+        self.update_only_files(id, selected).await?;
+        Ok(id)
+    }
+
+    /// Parse a .torrent file **without adding it** and return a preview payload
+    /// (name, size, file list, trackers) for the add-dialog.
+    pub fn preview_torrent_file(&self, path: &str) -> Result<Value> {
+        let path = PathBuf::from(path);
+        if !path.exists() {
+            anyhow::bail!("File not found: {}", path.display());
+        }
+        if !path
+            .extension()
+            .map(|e| e.eq_ignore_ascii_case("torrent"))
+            .unwrap_or(true)
+        {
+            anyhow::bail!(
+                "Unsupported file type: '{}'. Only .torrent files are supported.",
+                path.display()
+            );
+        }
+        let bytes = std::fs::read(&path).context("Failed to read .torrent file")?;
+        let parsed = librqbit::torrent_from_bytes_ext::<librqbit::ByteBuf>(&bytes)
+            .context("Failed to parse .torrent file")?;
+        let meta = &parsed.meta;
+        let info = &meta.info;
+
+        let name = info
+            .name
+            .as_ref()
+            .map(|n| String::from_utf8_lossy(n.as_ref()).into_owned())
+            .or_else(|| path.file_stem().map(|s| s.to_string_lossy().into_owned()))
+            .unwrap_or_else(|| "Unknown".to_string());
+
+        let mut total_size: u64 = 0;
+        let mut files: Vec<Value> = Vec::new();
+        for fd in info.iter_file_details()? {
+            let size = fd.len;
+            total_size += size;
+            let components = fd.filename.to_vec().unwrap_or_default();
+            files.push(serde_json::json!({
+                "path": components.join("/"),
+                "components": components,
+                "size": size,
+            }));
+        }
+
+        let trackers: Vec<String> = meta
+            .iter_announce()
+            .map(|b| String::from_utf8_lossy(b.as_ref()).into_owned())
+            .collect();
+
+        // Id20 is a pub tuple struct around [u8; 20]; encode as lowercase hex.
+        let info_hash: String = meta
+            .info_hash
+            .0
+            .iter()
+            .map(|b| format!("{:02x}", b))
+            .collect();
+
+        Ok(serde_json::json!({
+            "name": name,
+            "info_hash": info_hash,
+            "total_size": total_size,
+            "piece_length": info.piece_length,
+            "creation_date": meta.creation_date,
+            "comment": meta.comment.as_ref().map(|c| String::from_utf8_lossy(c.as_ref()).into_owned()),
+            "trackers": trackers,
+            "files": files,
+        }))
     }
 
     async fn add_torrent_inner(&self, add: AddTorrent<'_>) -> Result<u32> {
@@ -650,6 +749,7 @@ impl TorrentManager {
             let info_hash = t["info_hash"].as_str().unwrap_or("").to_string();
             let total_bytes = t["stats"]["total_bytes"].as_u64().unwrap_or(0);
             let uploaded_bytes = t["stats"]["uploaded_bytes"].as_u64().unwrap_or(0);
+            self.remove_added_at(&info_hash);
             let cat = self.get_torrent_category(id).and_then(|cid| {
                 let cfg = self.config.lock().unwrap();
                 cfg.categories
@@ -1188,8 +1288,31 @@ impl TorrentManager {
         tag
     }
 
+    pub fn update_tag(
+        &self,
+        id: u32,
+        name: String,
+        color: String,
+        auto_rule: Option<String>,
+    ) {
+        let mut cfg = self.config.lock().unwrap();
+        if let Some(tag) = cfg.tags.iter_mut().find(|t| t.id == id) {
+            tag.name = name;
+            tag.color = color;
+            tag.auto_rule = auto_rule;
+        }
+        drop(cfg);
+        self.save_config();
+    }
+
     pub fn remove_tag(&self, id: u32) {
-        self.config.lock().unwrap().tags.retain(|t| t.id != id);
+        let mut cfg = self.config.lock().unwrap();
+        cfg.tags.retain(|t| t.id != id);
+        // Drop the removed label from every torrent assignment too.
+        for tags in cfg.torrent_tags.values_mut() {
+            tags.retain(|t| *t != id);
+        }
+        drop(cfg);
         self.save_config();
     }
 
@@ -1200,6 +1323,194 @@ impl TorrentManager {
     pub fn set_global_download_path(&self, path: Option<String>) {
         self.config.lock().unwrap().global_download_path = path;
         self.save_config();
+    }
+
+    // ── Watch folder ────────────────────────────────────────────
+
+    pub fn get_watch_folder(&self) -> Option<String> {
+        self.config.lock().unwrap().watch_folder.clone()
+    }
+
+    pub fn set_watch_folder(&self, path: Option<String>) {
+        self.config.lock().unwrap().watch_folder = path;
+        self.save_config();
+    }
+
+    // ── Torrent health (age + seed sources) ──────────────────────
+
+    /// Record timestamps for torrents first seen this run (info_hash keyed,
+    /// persisted). Batched so the config mutex is taken once per payload
+    /// build — this is called on every stats tick. HTTP/FTP synthetic entries
+    /// ("http_…" hashes) and empty hashes are skipped.
+    ///
+    /// Note: torrents restored from session persistence have no recorded
+    /// timestamp, so their age starts from first observation after upgrade.
+    pub fn ensure_added_at_batch(&self, info_hashes: &[&str]) {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let mut cfg = self.config.lock().unwrap();
+        let mut changed = false;
+        for hash in info_hashes {
+            if hash.is_empty() || hash.starts_with("http_") {
+                continue;
+            }
+            if !cfg.torrent_added_at.contains_key(*hash) {
+                cfg.torrent_added_at.insert((*hash).to_string(), now);
+                changed = true;
+            }
+        }
+        drop(cfg);
+        if changed {
+            self.save_config();
+        }
+    }
+
+    pub fn remove_added_at(&self, info_hash: &str) {
+        let mut cfg = self.config.lock().unwrap();
+        if cfg.torrent_added_at.remove(info_hash).is_some() {
+            drop(cfg);
+            self.save_config();
+        }
+    }
+
+    pub fn added_at_map(&self) -> HashMap<String, u64> {
+        self.config.lock().unwrap().torrent_added_at.clone()
+    }
+
+    /// Refresh the per-torrent estimate of seed sources. A "source" is a
+    /// currently-connected peer from whom we've downloaded at least one
+    /// verified piece — i.e. a peer that demonstrably holds data.
+    /// librqbit does not expose per-peer completion, so this is a lower
+    /// bound on the real seed count.
+    pub fn update_seed_sources(&self) {
+        let list = self
+            .api
+            .api_torrent_list_ext(ApiTorrentListOpts { with_stats: true });
+        let mut sources: HashMap<u32, u32> = HashMap::new();
+        for t in &list.torrents {
+            let Some(id) = t.id else { continue };
+            let Ok(snapshot) = self.api.api_peer_stats(
+                TorrentIdOrHash::Id(id),
+                Default::default(),
+            ) else {
+                log::debug!("update_seed_sources: peer stats unavailable for torrent {}", id);
+                continue;
+            };
+            let val = serde_json::to_value(&snapshot).unwrap_or_default();
+            let mut count: u32 = 0;
+            if let Some(peers) = val["peers"].as_object() {
+                for p in peers.values() {
+                    let pieces = p["counters"]["downloaded_and_checked_pieces"]
+                        .as_u64()
+                        .unwrap_or(0);
+                    if pieces > 0 {
+                        count += 1;
+                    }
+                }
+            }
+            if count > 0 {
+                sources.insert(id as u32, count);
+            }
+        }
+        *self.seed_sources.lock().unwrap() = sources;
+    }
+
+    pub fn seed_sources_snapshot(&self) -> HashMap<u32, u32> {
+        self.seed_sources.lock().unwrap().clone()
+    }
+
+    pub fn get_clipboard_monitor(&self) -> bool {
+        self.config.lock().unwrap().clipboard_monitor
+    }
+
+    pub fn set_clipboard_monitor(&self, enabled: bool) {
+        self.config.lock().unwrap().clipboard_monitor = enabled;
+        self.save_config();
+    }
+
+    /// Whether a watch-folder filename is ready to be added — i.e. a .torrent
+    /// file that isn't still being written (download managers append suffixes
+    /// like `.part`, `.crdownload`, `.download` or `.tmp` while copying).
+    fn is_addable_watch_file(name: &str) -> bool {
+        let name = name.to_lowercase();
+        name.ends_with(".torrent")
+            && !name.ends_with(".part")
+            && !name.ends_with(".crdownload")
+            && !name.ends_with(".download")
+            && !name.ends_with(".tmp")
+    }
+
+    /// Scan the watch folder for new .torrent files and add them.
+    /// Returns the number of torrents added. Successfully processed files are
+    /// moved to an `.added` subfolder (so they aren't processed again); if the
+    /// move fails they are deleted instead. Files that fail to add (duplicate
+    /// info-hash, corrupt file, still being copied) are left in place but only
+    /// retried after a cooldown, to avoid logging every scan.
+    pub async fn scan_watch_folder(&self) -> u32 {
+        const FAILED_COOLDOWN: std::time::Duration = std::time::Duration::from_secs(120);
+        let Some(folder) = self.get_watch_folder() else {
+            return 0;
+        };
+        let dir = PathBuf::from(&folder);
+        if !dir.is_dir() {
+            return 0;
+        }
+        let entries = match std::fs::read_dir(&dir) {
+            Ok(e) => e,
+            Err(_) => return 0,
+        };
+        // Drop stale entries so a fixed/replaced file gets retried
+        {
+            let mut failed = self.watch_failed.lock().unwrap();
+            failed.retain(|path, at| path.exists() && at.elapsed() < FAILED_COOLDOWN);
+        }
+        let mut added = 0u32;
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_file() {
+                continue;
+            }
+            let name = path.file_name().unwrap_or_default().to_string_lossy();
+            if !Self::is_addable_watch_file(&name) {
+                continue;
+            }
+            if self.watch_failed.lock().unwrap().contains_key(&path) {
+                continue;
+            }
+            match self.add_torrent_file(&path.to_string_lossy()).await {
+                Ok(_) => {
+                    added += 1;
+                    self.watch_failed.lock().unwrap().remove(&path);
+                    Self::move_watched_file(&path);
+                }
+                Err(e) => {
+                    self.watch_failed
+                        .lock()
+                        .unwrap()
+                        .insert(path.clone(), std::time::Instant::now());
+                    log::warn!("Watch folder: failed to add {}: {}", path.display(), e);
+                }
+            }
+        }
+        added
+    }
+
+    /// Move a successfully processed .torrent out of the watch folder.
+    fn move_watched_file(path: &Path) {
+        let processed = path
+            .parent()
+            .map(|p| p.join(".added"))
+            .unwrap_or_else(|| PathBuf::from(".added"));
+        if std::fs::create_dir_all(&processed).is_ok() {
+            let dest = processed.join(path.file_name().unwrap_or_default());
+            if std::fs::rename(path, &dest).is_ok() {
+                return;
+            }
+        }
+        // Fallback: remove the file so it isn't re-processed on the next scan
+        let _ = std::fs::remove_file(path);
     }
 
     pub fn is_default_client_offered(&self) -> bool {
@@ -1805,6 +2116,43 @@ impl TorrentManager {
         self.save_config();
     }
 
+    // ── Super-seed mode ─────────────────────────────────────────
+    // Note: librqbit doesn't yet expose per-piece upload control, so the flag
+    // is persisted and exposed via UI/API and will be applied to the engine
+    // once it supports super-seeding.
+
+    pub fn get_torrent_super_seed(&self, id: u32) -> Option<bool> {
+        self.config
+            .lock()
+            .unwrap()
+            .per_torrent_super_seed
+            .get(&id)
+            .copied()
+    }
+
+    pub fn set_torrent_super_seed(&self, id: u32, enabled: Option<bool>) {
+        let mut cfg = self.config.lock().unwrap();
+        if let Some(val) = enabled {
+            cfg.per_torrent_super_seed.insert(id, val);
+        } else {
+            cfg.per_torrent_super_seed.remove(&id);
+        }
+        drop(cfg);
+        self.save_config();
+    }
+
+    /// IDs of torrents currently in super-seed mode.
+    pub fn super_seed_snapshot(&self) -> HashSet<u32> {
+        self.config
+            .lock()
+            .unwrap()
+            .per_torrent_super_seed
+            .iter()
+            .filter(|(_, &enabled)| enabled)
+            .map(|(id, _)| *id)
+            .collect()
+    }
+
     // ── DHT / PEX / LPD settings ────────────────────────────────
 
     pub fn get_global_disable_dht(&self) -> bool {
@@ -2051,5 +2399,30 @@ impl ManagerHandle {
             Some(Err(e)) => Err(e),
             None => Err("Torrent engine is still starting\u{2026}"),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::TorrentManager;
+
+    #[test]
+    fn test_is_addable_watch_file() {
+        // Plain .torrent files are addable
+        assert!(TorrentManager::is_addable_watch_file("movie.torrent"));
+        // Case-insensitive extension
+        assert!(TorrentManager::is_addable_watch_file("MOVIE.TORRENT"));
+        // Partially-written / download-manager suffixes are skipped
+        assert!(!TorrentManager::is_addable_watch_file("movie.torrent.part"));
+        assert!(!TorrentManager::is_addable_watch_file(
+            "movie.torrent.crdownload"
+        ));
+        assert!(!TorrentManager::is_addable_watch_file(
+            "movie.torrent.download"
+        ));
+        assert!(!TorrentManager::is_addable_watch_file("movie.torrent.tmp"));
+        // Non-torrent files are skipped
+        assert!(!TorrentManager::is_addable_watch_file("notes.txt"));
+        assert!(!TorrentManager::is_addable_watch_file("movie.torrent2"));
     }
 }
